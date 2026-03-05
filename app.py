@@ -1,15 +1,12 @@
-print("DEPLOY CHECK ✅ app.py is the NEW psycopg version")
-print("DEPLOY CHECK ✅ commit:", os.getenv("RENDER_GIT_COMMIT"))
 import os
 from typing import Any, Dict, Optional
 
+print("DEPLOY CHECK ✅ app.py is the NEW psycopg version")
+print("DEPLOY CHECK ✅ commit:", os.getenv("RENDER_GIT_COMMIT"))
+
 from fastapi import FastAPI, HTTPException
 import psycopg
-
-
 app = FastAPI(title="Orchid Continuum Control Panel API")
-
-
 def get_conn() -> psycopg.Connection:
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
