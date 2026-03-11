@@ -1,5 +1,6 @@
 import os
 from typing import Any
+from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 
 
 def get_database_url() -> str:
@@ -20,6 +21,16 @@ def get_database_url() -> str:
 
 def get_conn() -> psycopg.Connection:
     return psycopg.connect(get_database_url(), row_factory=dict_row)
+
+
+def to_json_number(value):
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    return value
 
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
@@ -80,26 +91,10 @@ def db_ping() -> dict[str, Any]:
 
 @app.get("/api/orchid-atlas")
 def orchid_atlas(
-    mode: str = Query(
-        default="species",
-        description="Atlas weighting mode: 'species' or 'records'",
-    ),
-    min_records: int = Query(
-        default=1,
-        ge=1,
-        description="Minimum records required for a grid cell to be returned",
-    ),
-    min_species: int = Query(
-        default=1,
-        ge=1,
-        description="Minimum species_count required for a grid cell to be returned",
-    ),
-    limit: int = Query(
-        default=5000,
-        ge=1,
-        le=100000,
-        description="Maximum number of atlas cells to return",
-    ),
+    mode: str = Query(default="species"),
+    min_records: int = Query(default=1, ge=1),
+    min_species: int = Query(default=1, ge=1),
+    limit: int = Query(default=5000, ge=1, le=100000),
 ) -> dict[str, Any]:
     if mode not in {"species", "records"}:
         raise HTTPException(
@@ -147,14 +142,14 @@ def orchid_atlas(
 
         cells = [
             {
-                "lat": float(row["lat_band"]),
-                "lon": float(row["lon_band"]),
-                "records": int(row["records"]),
-                "species_count": int(row["species_count"]),
-                "genus_count": int(row["genus_count"]),
-                "min_elevation_m": row["min_elevation_m"],
-                "max_elevation_m": row["max_elevation_m"],
-                "country_count": int(row["country_count"]),
+                "lat": float(to_json_number(row["lat_band"])),
+                "lon": float(to_json_number(row["lon_band"])),
+                "records": int(to_json_number(row["records"])),
+                "species_count": int(to_json_number(row["species_count"])),
+                "genus_count": int(to_json_number(row["genus_count"])),
+                "min_elevation_m": to_json_number(row["min_elevation_m"]),
+                "max_elevation_m": to_json_number(row["max_elevation_m"]),
+                "country_count": int(to_json_number(row["country_count"])),
                 "first_record_at": (
                     row["first_record_at"].isoformat()
                     if row["first_record_at"] is not None
@@ -183,10 +178,7 @@ def orchid_atlas(
     except psycopg.errors.UndefinedTable as exc:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Atlas layer is missing. Ensure these database objects exist: "
-                "public.orchid_atlas_layer."
-            ),
+            detail="Atlas layer is missing. Ensure these database objects exist: public.orchid_atlas_layer.",
         ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Atlas query failed: {exc}") from exc
@@ -225,14 +217,14 @@ def orchid_atlas_top(
             "count": len(rows),
             "cells": [
                 {
-                    "lat": float(row["lat_band"]),
-                    "lon": float(row["lon_band"]),
-                    "records": int(row["records"]),
-                    "species_count": int(row["species_count"]),
-                    "genus_count": int(row["genus_count"]),
-                    "min_elevation_m": row["min_elevation_m"],
-                    "max_elevation_m": row["max_elevation_m"],
-                    "country_count": int(row["country_count"]),
+                    "lat": float(to_json_number(row["lat_band"])),
+                    "lon": float(to_json_number(row["lon_band"])),
+                    "records": int(to_json_number(row["records"])),
+                    "species_count": int(to_json_number(row["species_count"])),
+                    "genus_count": int(to_json_number(row["genus_count"])),
+                    "min_elevation_m": to_json_number(row["min_elevation_m"]),
+                    "max_elevation_m": to_json_number(row["max_elevation_m"]),
+                    "country_count": int(to_json_number(row["country_count"])),
                     "first_record_at": (
                         row["first_record_at"].isoformat()
                         if row["first_record_at"] is not None
@@ -309,15 +301,18 @@ def orchid_atlas_geojson(
                     "type": "Feature",
                     "geometry": {
                         "type": "Point",
-                        "coordinates": [float(row["lon_band"]), float(row["lat_band"])],
+                        "coordinates": [
+                            float(to_json_number(row["lon_band"])),
+                            float(to_json_number(row["lat_band"])),
+                        ],
                     },
                     "properties": {
-                        "records": int(row["records"]),
-                        "species_count": int(row["species_count"]),
-                        "genus_count": int(row["genus_count"]),
-                        "min_elevation_m": row["min_elevation_m"],
-                        "max_elevation_m": row["max_elevation_m"],
-                        "country_count": int(row["country_count"]),
+                        "records": int(to_json_number(row["records"])),
+                        "species_count": int(to_json_number(row["species_count"])),
+                        "genus_count": int(to_json_number(row["genus_count"])),
+                        "min_elevation_m": to_json_number(row["min_elevation_m"]),
+                        "max_elevation_m": to_json_number(row["max_elevation_m"]),
+                        "country_count": int(to_json_number(row["country_count"])),
                         "first_record_at": (
                             row["first_record_at"].isoformat()
                             if row["first_record_at"] is not None
