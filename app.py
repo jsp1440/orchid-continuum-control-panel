@@ -62,6 +62,33 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/system/status")
+def system_status() -> dict[str, Any]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok")
+                row = cur.fetchone()
+                db_ok = bool(row and row["ok"] == 1)
+
+        return {
+            "ok": True,
+            "service": APP_TITLE,
+            "version": APP_VERSION,
+            "status": "running",
+            "database": "connected" if db_ok else "error",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "service": APP_TITLE,
+            "version": APP_VERSION,
+            "status": "running",
+            "database": "error",
+            "detail": str(exc),
+        }
+
+
 @app.get("/db/ping")
 def db_ping() -> dict[str, Any]:
     try:
