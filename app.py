@@ -364,3 +364,38 @@ def orchid_atlas_geojson(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Atlas GeoJSON query failed: {exc}") from exc
+@app.get("/system/status")
+def system_status():
+    """
+    Global system status for Orchid Continuum.
+    Used by control panel dashboard.
+    """
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) FROM oc_occurrences")
+        occurrences = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(DISTINCT species) FROM oc_occurrences WHERE species IS NOT NULL")
+        species = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM oc_media")
+        media = cur.fetchone()[0]
+
+        cur.execute("SELECT MIN(elevation_m), MAX(elevation_m) FROM oc_occurrences")
+        elev = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        return {
+            "status": "ok",
+            "occurrences": occurrences,
+            "species": species,
+            "media": media,
+            "elevation_range": elev
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
