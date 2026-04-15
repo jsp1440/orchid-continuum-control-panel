@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, Optional
 from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException, Query
@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 
 
 def get_database_url() -> str:
@@ -114,6 +114,93 @@ def db_ping() -> dict[str, Any]:
                 }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Database ping failed: {exc}") from exc
+
+
+@app.get("/api/orchid-widgets/featured-gallery")
+def featured_orchid_gallery(
+    limit: int = Query(default=12, ge=1, le=48),
+    genus: Optional[str] = Query(default=None),
+) -> dict[str, Any]:
+    try:
+        sql = """
+            WITH ranked_gallery AS (
+                SELECT
+                    g.scientific_name,
+                    g.genus,
+                    g.family,
+                    g.image_url AS hero_image_url,
+                    g.image_type,
+                    g.is_primary,
+                    g.image_rank,
+                    COUNT(*) OVER (PARTITION BY g.scientific_name) AS image_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY g.scientific_name
+                        ORDER BY
+                            CASE WHEN g.is_primary THEN 0 ELSE 1 END,
+                            g.image_rank ASC NULLS LAST,
+                            g.image_url
+                    ) AS rn
+                FROM public.oc_species_display_gallery_view g
+                WHERE (%(genus)s IS NULL OR g.genus ILIKE %(genus_pattern)s)
+            )
+            SELECT
+                scientific_name,
+                genus,
+                family,
+                hero_image_url,
+                image_type,
+                image_count
+            FROM ranked_gallery
+            WHERE rn = 1
+            ORDER BY image_count DESC, scientific_name ASC
+            LIMIT %(limit)s
+        """
+
+        params = {
+            "limit": limit,
+            "genus": genus,
+            "genus_pattern": f"%{genus}%" if genus else None,
+        }
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+
+        cards = [
+            {
+                "scientific_name": row["scientific_name"],
+                "display_name": row["scientific_name"],
+                "genus": row["genus"],
+                "family": row["family"],
+                "hero_image_url": row["hero_image_url"],
+                "image_type": row["image_type"],
+                "image_count": int(to_json_number(row["image_count"])),
+                "atlas_available": True,
+            }
+            for row in rows
+        ]
+
+        return {
+            "widget": "featured_gallery",
+            "count": len(cards),
+            "filters": {"genus": genus},
+            "cards": cards,
+        }
+
+    except psycopg.errors.UndefinedTable as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Gallery view is missing. Ensure this database object exists: "
+                "public.oc_species_display_gallery_view"
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Featured gallery query failed: {exc}",
+        ) from exc
 
 
 @app.get("/api/orchid-atlas")
@@ -364,38 +451,3 @@ def orchid_atlas_geojson(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Atlas GeoJSON query failed: {exc}") from exc
-@app.get("/system/status")
-def system_status():
-    """
-    Global system status for Orchid Continuum.
-    Used by control panel dashboard.
-    """
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur = conn.cursor()
-
-        cur.execute("SELECT COUNT(*) FROM oc_occurrences")
-        occurrences = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(DISTINCT species) FROM oc_occurrences WHERE species IS NOT NULL")
-        species = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM oc_media")
-        media = cur.fetchone()[0]
-
-        cur.execute("SELECT MIN(elevation_m), MAX(elevation_m) FROM oc_occurrences")
-        elev = cur.fetchone()
-
-        cur.close()
-        conn.close()
-
-        return {
-            "status": "ok",
-            "occurrences": occurrences,
-            "species": species,
-            "media": media,
-            "elevation_range": elev
-        }
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
