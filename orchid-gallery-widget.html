@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Featured Orchid Gallery</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f8f4;
+}
+
+#orchid-gallery {
+  padding: 10px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  transition: transform 0.2s;
+}
+
+.card:hover {
+  transform: scale(1.03);
+}
+
+.card img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+}
+
+.card-body {
+  padding: 8px;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.meta {
+  font-size: 12px;
+  color: #666;
+}
+
+.count {
+  font-size: 11px;
+  color: #999;
+}
+</style>
+</head>
+
+<body>
+
+<div id="orchid-gallery">
+  <div class="gallery-grid" id="gallery"></div>
+</div>
+
+<script>
+const API_URL = "https://orchid-continuum-control-panel.onrender.com/api/orchid-widgets/featured-gallery?limit=12";
+
+async function loadGallery() {
+  try {
+    const res = await fetch(API_URL);
+    const data = await res.json();
+
+    const gallery = document.getElementById("gallery");
+
+    data.cards.forEach(card => {
+      const div = document.createElement("div");
+      div.className = "card";
+
+      div.innerHTML = `
+        <img src="${card.hero_image_url}" />
+        <div class="card-body">
+          <div class="name">${card.display_name}</div>
+          <div class="meta">${card.genus} • ${card.family}</div>
+          <div class="count">${card.image_count} images</div>
+        </div>
+      `;
+
+      gallery.appendChild(div);
+    });
+
+  } catch (err) {
+    document.getElementById("gallery").innerHTML = "Failed to load orchids.";
+    console.error(err);
+  }
+}
+
+loadGallery();
+</script>
+
+</body>
+</html>
