@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.1.3"
 
 
 def get_database_url() -> str:
@@ -141,7 +141,7 @@ def featured_orchid_gallery(
                             g.image_url
                     ) AS rn
                 FROM public.oc_species_display_gallery_view g
-                WHERE (%(genus)s IS NULL OR g.genus ILIKE %(genus_pattern)s)
+                WHERE (%(genus)s::text IS NULL OR g.genus ILIKE %(genus_pattern)s)
             )
             SELECT
                 scientific_name,
