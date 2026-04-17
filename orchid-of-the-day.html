@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orchid of the Day</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f5f7f4;
+      color: #1f351f;
+    }
+
+    .widget-wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 14px;
+    }
+
+    .widget-title {
+      text-align: center;
+      font-size: 28px;
+      font-weight: bold;
+      margin: 8px 0 18px;
+      color: #234123;
+    }
+
+    .status {
+      text-align: center;
+      padding: 30px;
+      color: #5b6f58;
+      font-size: 15px;
+    }
+
+    .spotlight {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .main-panel {
+      background: #ffffff;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.12);
+    }
+
+    .main-image-wrap {
+      width: 100%;
+      background: #dde7d9;
+    }
+
+    .main-image {
+      width: 100%;
+      height: 520px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .main-caption {
+      padding: 14px 16px 18px;
+    }
+
+    .orchid-name {
+      font-size: 24px;
+      font-style: italic;
+      font-weight: bold;
+      margin: 0 0 8px;
+      color: #1f351f;
+    }
+
+    .meta {
+      font-size: 14px;
+      color: #5b6f58;
+      margin-bottom: 10px;
+    }
+
+    .description {
+      font-size: 15px;
+      line-height: 1.5;
+      color: #334533;
+    }
+
+    .thumb-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .thumb {
+      border: 3px solid transparent;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .thumb.active {
+      border-color: #355f34;
+    }
+
+    .thumb img {
+      width: 100%;
+      height: 90px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .info-box {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.12);
+    }
+
+    .info-box h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      color: #234123;
+    }
+
+    .info-line {
+      font-size: 14px;
+      color: #445844;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .label {
+      font-weight: bold;
+      color: #234123;
+    }
+
+    @media (max-width: 860px) {
+      .spotlight {
+        grid-template-columns: 1fr;
+      }
+
+      .main-image {
+        height: 360px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="widget-wrap">
+    <div class="widget-title">Orchid of the Day</div>
+    <div id="status" class="status">Loading orchid of the day...</div>
+    <div id="content"></div>
+  </div>
+
+  <script>
+    const API_URL = "https://orchid-continuum-control-panel.onrender.com/api/orchid-widgets/orchid-of-the-day";
+    let currentIndex = 0;
+    let rotationTimer = null;
+    let images = [];
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function setMainImage(index) {
+      if (!images.length) return;
+
+      currentIndex = index;
+      const mainImage = document.getElementById("main-image");
+      if (mainImage) {
+        mainImage.src = images[index];
+      }
+
+      document.querySelectorAll(".thumb").forEach((thumb, i) => {
+        thumb.classList.toggle("active", i === index);
+      });
+    }
+
+    function startRotation() {
+      stopRotation();
+      if (images.length <= 1) return;
+
+      rotationTimer = setInterval(() => {
+        const nextIndex = (currentIndex + 1) % images.length;
+        setMainImage(nextIndex);
+      }, 5000);
+    }
+
+    function stopRotation() {
+      if (rotationTimer) {
+        clearInterval(rotationTimer);
+        rotationTimer = null;
+      }
+    }
+
+    function resetRotation() {
+      startRotation();
+    }
+
+    async function loadOrchidOfTheDay() {
+      const status = document.getElementById("status");
+      const content = document.getElementById("content");
+
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error("API request failed with status " + response.status);
+        }
+
+        const data = await response.json();
+
+        images = Array.isArray(data.images) && data.images.length
+          ? data.images.slice(0, 9)
+          : (data.hero_image_url ? [data.hero_image_url] : []);
+
+        if (!images.length) {
+          status.textContent = "No orchid images were returned.";
+          return;
+        }
+
+        const displayName = data.display_name || data.scientific_name || "Unknown Orchid";
+        const genus = data.genus || "";
+        const family = data.family || "";
+        const region = data.region || "";
+        const habitat = data.habitat || "";
+        const imageCount = data.image_count || images.length;
+        const caption = data.caption || "A featured orchid from the Orchid Continuum.";
+
+        status.style.display = "none";
+
+        content.innerHTML = `
+          <div class="spotlight">
+            <div class="main-panel">
+              <div class="main-image-wrap">
+                <img id="main-image" class="main-image" src="${escapeHtml(images[0])}" alt="${escapeHtml(displayName)}">
+              </div>
+              <div class="main-caption">
+                <div class="orchid-name">${escapeHtml(displayName)}</div>
+                <div class="meta">${escapeHtml(genus)} • ${escapeHtml(family)}</div>
+                <div class="description">${escapeHtml(caption)}</div>
+              </div>
+            </div>
+
+            <div class="thumb-panel">
+              <div class="thumb-grid" id="thumb-grid"></div>
+
+              <div class="info-box">
+                <h3>About this orchid</h3>
+                <div class="info-line"><span class="label">Scientific name:</span> ${escapeHtml(data.scientific_name || displayName)}</div>
+                <div class="info-line"><span class="label">Genus:</span> ${escapeHtml(genus || "Unknown")}</div>
+                <div class="info-line"><span class="label">Family:</span> ${escapeHtml(family || "Orchidaceae")}</div>
+                <div class="info-line"><span class="label">Region:</span> ${escapeHtml(region || "Not available")}</div>
+                <div class="info-line"><span class="label">Habitat:</span> ${escapeHtml(habitat || "Not available")}</div>
+                <div class="info-line"><span class="label">Images available:</span> ${escapeHtml(imageCount)}</div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const thumbGrid = document.getElementById("thumb-grid");
+        images.forEach((imgUrl, index) => {
+          const button = document.createElement("button");
+          button.className = "thumb" + (index === 0 ? " active" : "");
+          button.type = "button";
+          button.innerHTML = `<img src="${imgUrl}" alt="Thumbnail ${index + 1}">`;
+          button.addEventListener("click", () => {
+            setMainImage(index);
+            resetRotation();
+          });
+          thumbGrid.appendChild(button);
+        });
+
+        startRotation();
+      } catch (error) {
+        status.textContent = "Failed to load orchid of the day.";
+        console.error(error);
+      }
+    }
+
+    loadOrchidOfTheDay();
+  </script>
+</body>
+</html>
