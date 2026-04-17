@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.1.4"
+APP_VERSION = "0.2.0"
 
 
 def get_database_url() -> str:
@@ -31,6 +31,24 @@ def to_json_number(value):
             return int(value)
         return float(value)
     return value
+
+
+def build_caption(
+    display_name: str,
+    family: Optional[str],
+    region: Optional[str],
+    habitat: Optional[str],
+    image_count: int,
+) -> str:
+    parts = [f"{display_name} is featured today from the Orchid Continuum gallery."]
+    if family:
+        parts.append(f"It belongs to the family {family}.")
+    if region:
+        parts.append(f"Occurrence data currently point to {region}.")
+    if habitat:
+        parts.append(f"Habitat notes: {habitat}")
+    parts.append(f"The gallery currently includes {image_count} image{'s' if image_count != 1 else ''} for this orchid.")
+    return " ".join(parts)
 
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
@@ -251,6 +269,300 @@ def featured_orchid_gallery(
         raise HTTPException(
             status_code=500,
             detail=f"Featured gallery query failed: {exc}",
+        ) from exc
+
+
+@app.get("/api/orchid-widgets/orchid-of-the-day")
+def orchid_of_the_day(
+    min_images: int = Query(default=5, ge=3, le=50),
+    max_thumbnails: int = Query(default=9, ge=1, le=12),
+) -> dict[str, Any]:
+    """
+    Deterministic daily species spotlight.
+    Picks one species per day from the eligible gallery pool, preferring species with
+    multiple images and preferring flower images for the hero image when available.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # 1) Pick the species for the day from the eligible pool.
+                cur.execute(
+                    """
+                    WITH species_counts AS (
+                        SELECT
+                            scientific_name,
+                            MIN(genus) AS genus,
+                            MIN(family) AS family,
+                            COUNT(*) AS image_count
+                        FROM public.oc_species_display_gallery_view
+                        GROUP BY scientific_name
+                        HAVING COUNT(*) >= %(min_images)s
+                    )
+                    SELECT
+                        scientific_name,
+                        genus,
+                        family,
+                        image_count
+                    FROM species_counts
+                    ORDER BY md5(current_date::text || scientific_name)
+                    LIMIT 1
+                    """,
+                    {"min_images": min_images},
+                )
+                species_row = cur.fetchone()
+
+                if not species_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No eligible orchid-of-the-day species found.",
+                    )
+
+                scientific_name = species_row["scientific_name"]
+                genus = species_row["genus"]
+                family = species_row["family"]
+                image_count = int(to_json_number(species_row["image_count"]))
+
+                # 2) Pull up to max_thumbnails image URLs, preferring flower images.
+                cur.execute(
+                    """
+                    WITH flower_images AS (
+                        SELECT
+                            image_url,
+                            image_type,
+                            is_primary,
+                            image_rank,
+                            0 AS source_priority
+                        FROM public.oc_species_flower_gallery_view
+                        WHERE scientific_name = %(scientific_name)s
+                    ),
+                    display_images AS (
+                        SELECT
+                            image_url,
+                            image_type,
+                            is_primary,
+                            image_rank,
+                            1 AS source_priority
+                        FROM public.oc_species_display_gallery_view
+                        WHERE scientific_name = %(scientific_name)s
+                    ),
+                    merged AS (
+                        SELECT DISTINCT ON (image_url)
+                            image_url,
+                            image_type,
+                            is_primary,
+                            image_rank,
+                            source_priority
+                        FROM (
+                            SELECT * FROM flower_images
+                            UNION ALL
+                            SELECT * FROM display_images
+                        ) x
+                        WHERE image_url IS NOT NULL
+                        ORDER BY image_url, source_priority, is_primary DESC, image_rank ASC NULLS LAST
+                    )
+                    SELECT
+                        image_url,
+                        image_type,
+                        is_primary,
+                        image_rank,
+                        source_priority
+                    FROM merged
+                    ORDER BY
+                        source_priority ASC,
+                        CASE WHEN is_primary THEN 0 ELSE 1 END,
+                        image_rank ASC NULLS LAST,
+                        image_url
+                    LIMIT %(max_thumbnails)s
+                    """,
+                    {
+                        "scientific_name": scientific_name,
+                        "max_thumbnails": max_thumbnails,
+                    },
+                )
+                image_rows = cur.fetchall()
+
+                images = [row["image_url"] for row in image_rows if row["image_url"]]
+                hero_image_url = images[0] if images else None
+
+                if not hero_image_url:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No images found for orchid-of-the-day species.",
+                    )
+
+                # 3) Optional atlas / country summary.
+                cur.execute(
+                    """
+                    WITH occ AS (
+                        SELECT country
+                        FROM oc_atlas.occurrences
+                        WHERE scientific_name = %(scientific_name)s
+                          AND country IS NOT NULL
+                    )
+                    SELECT
+                        string_agg(country, ', ' ORDER BY country) AS countries
+                    FROM (
+                        SELECT country
+                        FROM occ
+                        GROUP BY country
+                        ORDER BY COUNT(*) DESC, country
+                        LIMIT 3
+                    ) top_countries
+                    """,
+                    {"scientific_name": scientific_name},
+                )
+                occ_row = cur.fetchone()
+                region = occ_row["countries"] if occ_row and occ_row["countries"] else None
+
+                # 4) Optional taxonomy / dossier / habitat enrichment using direct + normalized name paths.
+                cur.execute(
+                    """
+                    WITH selected AS (
+                        SELECT
+                            %(scientific_name)s::text AS gallery_scientific_name,
+                            lower(trim(split_part(regexp_replace(%(scientific_name)s::text, '\s*\(.*$', ''), ',', 1))) AS normalized_name
+                    ),
+                    direct_taxonomy AS (
+                        SELECT
+                            t.id,
+                            COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name) AS accepted_name,
+                            t.family,
+                            t.genus,
+                            1 AS priority
+                        FROM public.orchid_taxonomy t
+                        JOIN selected s
+                          ON lower(trim(COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name))) = lower(trim(s.gallery_scientific_name))
+                    ),
+                    normalized_taxonomy AS (
+                        SELECT
+                            t.id,
+                            COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name) AS accepted_name,
+                            t.family,
+                            t.genus,
+                            2 AS priority
+                        FROM public.orchid_taxonomy t
+                        JOIN selected s
+                          ON lower(trim(split_part(regexp_replace(COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name), '\s*\(.*$', ''), ',', 1))) = s.normalized_name
+                    ),
+                    best_taxonomy AS (
+                        SELECT *
+                        FROM (
+                            SELECT * FROM direct_taxonomy
+                            UNION ALL
+                            SELECT * FROM normalized_taxonomy
+                        ) z
+                        ORDER BY priority, accepted_name
+                        LIMIT 1
+                    ),
+                    best_dossier AS (
+                        SELECT
+                            d.accepted_scientific_name,
+                            d.accepted_scientific_name_html
+                        FROM oc_taxonomy.species_dossier_v2 d
+                        JOIN selected s
+                          ON lower(trim(d.accepted_scientific_name)) = s.normalized_name
+                        LIMIT 1
+                    ),
+                    best_habitat AS (
+                        SELECT
+                            h.canonical_name,
+                            h.habitat_description,
+                            h.light_conditions,
+                            h.moisture_conditions,
+                            h.min_elevation_m,
+                            h.max_elevation_m
+                        FROM oc_habitat.species_habitat_profile h
+                        JOIN best_taxonomy bt
+                          ON h.accepted_taxon_id = bt.id
+                        LIMIT 1
+                    )
+                    SELECT
+                        bt.id AS taxonomy_id,
+                        bt.accepted_name,
+                        bt.family AS taxonomy_family,
+                        bt.genus AS taxonomy_genus,
+                        bd.accepted_scientific_name_html,
+                        bh.canonical_name AS habitat_name,
+                        bh.habitat_description,
+                        bh.light_conditions,
+                        bh.moisture_conditions,
+                        bh.min_elevation_m,
+                        bh.max_elevation_m
+                    FROM best_taxonomy bt
+                    FULL OUTER JOIN best_dossier bd ON TRUE
+                    FULL OUTER JOIN best_habitat bh ON TRUE
+                    LIMIT 1
+                    """,
+                    {"scientific_name": scientific_name},
+                )
+                enrich_row = cur.fetchone()
+
+        display_name = scientific_name
+        habitat_text = None
+
+        if enrich_row:
+            if enrich_row.get("accepted_name"):
+                display_name = enrich_row["accepted_name"]
+            if enrich_row.get("accepted_scientific_name_html"):
+                # Keep plain display_name simple; HTML can be exposed separately if needed later.
+                pass
+
+            habitat_bits = []
+            if enrich_row.get("habitat_description"):
+                habitat_bits.append(enrich_row["habitat_description"])
+            if enrich_row.get("light_conditions"):
+                habitat_bits.append(f"Light: {enrich_row['light_conditions']}")
+            if enrich_row.get("moisture_conditions"):
+                habitat_bits.append(f"Moisture: {enrich_row['moisture_conditions']}")
+            if enrich_row.get("min_elevation_m") is not None or enrich_row.get("max_elevation_m") is not None:
+                min_elev = enrich_row.get("min_elevation_m")
+                max_elev = enrich_row.get("max_elevation_m")
+                if min_elev is not None and max_elev is not None:
+                    habitat_bits.append(f"Elevation: {int(to_json_number(min_elev))}–{int(to_json_number(max_elev))} m")
+                elif min_elev is not None:
+                    habitat_bits.append(f"Elevation: from {int(to_json_number(min_elev))} m")
+                elif max_elev is not None:
+                    habitat_bits.append(f"Elevation: up to {int(to_json_number(max_elev))} m")
+            habitat_text = " | ".join(habitat_bits) if habitat_bits else None
+
+        caption = build_caption(
+            display_name=display_name,
+            family=family,
+            region=region,
+            habitat=habitat_text,
+            image_count=image_count,
+        )
+
+        return {
+            "widget": "orchid_of_the_day",
+            "display_name": display_name,
+            "scientific_name": scientific_name,
+            "genus": genus,
+            "family": family,
+            "hero_image_url": hero_image_url,
+            "images": images,
+            "caption": caption,
+            "region": region,
+            "habitat": habitat_text,
+            "image_count": image_count,
+        }
+
+    except psycopg.errors.UndefinedTable as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "A required widget table or view is missing. Ensure these database objects exist: "
+                "public.oc_species_display_gallery_view, public.oc_species_flower_gallery_view, "
+                "public.orchid_taxonomy, oc_taxonomy.species_dossier_v2, "
+                "oc_habitat.species_habitat_profile, oc_atlas.occurrences"
+            ),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Orchid of the day query failed: {exc}",
         ) from exc
 
 
