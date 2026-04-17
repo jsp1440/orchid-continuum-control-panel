@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.1.3"
+APP_VERSION = "0.1.4"
 
 
 def get_database_url() -> str:
@@ -120,15 +120,38 @@ def db_ping() -> dict[str, Any]:
 def featured_orchid_gallery(
     limit: int = Query(default=12, ge=1, le=48),
     genus: Optional[str] = Query(default=None),
+    randomize: bool = Query(default=False),
 ) -> dict[str, Any]:
     try:
-        sql = """
-            WITH ranked_gallery AS (
+        order_sql = "RANDOM()" if randomize else "image_count DESC, scientific_name ASC"
+
+        sql = f"""
+            WITH flower_ranked AS (
                 SELECT
                     g.scientific_name,
                     g.genus,
                     g.family,
-                    g.image_url AS hero_image_url,
+                    g.image_url,
+                    g.image_type,
+                    g.is_primary,
+                    g.image_rank,
+                    COUNT(*) OVER (PARTITION BY g.scientific_name) AS image_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY g.scientific_name
+                        ORDER BY
+                            CASE WHEN g.is_primary THEN 0 ELSE 1 END,
+                            g.image_rank ASC NULLS LAST,
+                            g.image_url
+                    ) AS rn
+                FROM public.oc_species_flower_gallery_view g
+                WHERE (%(genus)s::text IS NULL OR g.genus ILIKE %(genus_pattern)s)
+            ),
+            display_ranked AS (
+                SELECT
+                    g.scientific_name,
+                    g.genus,
+                    g.family,
+                    g.image_url,
                     g.image_type,
                     g.is_primary,
                     g.image_rank,
@@ -142,6 +165,30 @@ def featured_orchid_gallery(
                     ) AS rn
                 FROM public.oc_species_display_gallery_view g
                 WHERE (%(genus)s::text IS NULL OR g.genus ILIKE %(genus_pattern)s)
+            ),
+            merged AS (
+                SELECT
+                    d.scientific_name,
+                    d.genus,
+                    d.family,
+                    COALESCE(f.image_url, d.image_url) AS hero_image_url,
+                    COALESCE(f.image_type, d.image_type) AS image_type,
+                    COALESCE(f.image_count, d.image_count) AS image_count,
+                    CASE
+                        WHEN f.image_url IS NOT NULL THEN true
+                        ELSE false
+                    END AS flower_preferred
+                FROM (
+                    SELECT *
+                    FROM display_ranked
+                    WHERE rn = 1
+                ) d
+                LEFT JOIN (
+                    SELECT *
+                    FROM flower_ranked
+                    WHERE rn = 1
+                ) f
+                  ON d.scientific_name = f.scientific_name
             )
             SELECT
                 scientific_name,
@@ -149,10 +196,10 @@ def featured_orchid_gallery(
                 family,
                 hero_image_url,
                 image_type,
-                image_count
-            FROM ranked_gallery
-            WHERE rn = 1
-            ORDER BY image_count DESC, scientific_name ASC
+                image_count,
+                flower_preferred
+            FROM merged
+            ORDER BY {order_sql}
             LIMIT %(limit)s
         """
 
@@ -177,6 +224,7 @@ def featured_orchid_gallery(
                 "image_type": row["image_type"],
                 "image_count": int(to_json_number(row["image_count"])),
                 "atlas_available": True,
+                "flower_preferred": bool(row["flower_preferred"]),
             }
             for row in rows
         ]
@@ -184,7 +232,10 @@ def featured_orchid_gallery(
         return {
             "widget": "featured_gallery",
             "count": len(cards),
-            "filters": {"genus": genus},
+            "filters": {
+                "genus": genus,
+                "randomize": randomize,
+            },
             "cards": cards,
         }
 
@@ -192,8 +243,8 @@ def featured_orchid_gallery(
         raise HTTPException(
             status_code=500,
             detail=(
-                "Gallery view is missing. Ensure this database object exists: "
-                "public.oc_species_display_gallery_view"
+                "A required gallery view is missing. Ensure these database objects exist: "
+                "public.oc_species_display_gallery_view and public.oc_species_flower_gallery_view"
             ),
         ) from exc
     except Exception as exc:
