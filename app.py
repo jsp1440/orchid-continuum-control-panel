@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum Control Panel API"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 
 
 def get_database_url() -> str:
@@ -192,10 +192,7 @@ def featured_orchid_gallery(
                     COALESCE(f.image_url, d.image_url) AS hero_image_url,
                     COALESCE(f.image_type, d.image_type) AS image_type,
                     COALESCE(f.image_count, d.image_count) AS image_count,
-                    CASE
-                        WHEN f.image_url IS NOT NULL THEN true
-                        ELSE false
-                    END AS flower_preferred
+                    CASE WHEN f.image_url IS NOT NULL THEN true ELSE false END AS flower_preferred
                 FROM (
                     SELECT *
                     FROM display_ranked
@@ -277,15 +274,9 @@ def orchid_of_the_day(
     min_images: int = Query(default=5, ge=3, le=50),
     max_thumbnails: int = Query(default=9, ge=1, le=12),
 ) -> dict[str, Any]:
-    """
-    Deterministic daily species spotlight.
-    Picks one species per day from the eligible gallery pool, preferring species with
-    multiple images and preferring flower images for the hero image when available.
-    """
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                # 1) Pick the species for the day from the eligible pool.
                 cur.execute(
                     """
                     WITH species_counts AS (
@@ -322,7 +313,6 @@ def orchid_of_the_day(
                 family = species_row["family"]
                 image_count = int(to_json_number(species_row["image_count"]))
 
-                # 2) Pull up to max_thumbnails image URLs, preferring flower images.
                 cur.execute(
                     """
                     WITH flower_images AS (
@@ -390,7 +380,6 @@ def orchid_of_the_day(
                         detail="No images found for orchid-of-the-day species.",
                     )
 
-                # 3) Optional atlas / country summary.
                 cur.execute(
                     """
                     WITH occ AS (
@@ -414,7 +403,6 @@ def orchid_of_the_day(
                 occ_row = cur.fetchone()
                 region = occ_row["countries"] if occ_row and occ_row["countries"] else None
 
-                # 4) Optional taxonomy / dossier / habitat enrichment using direct + normalized name paths.
                 cur.execute(
                     """
                     WITH selected AS (
@@ -439,378 +427,4 @@ def orchid_of_the_day(
                             COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name) AS accepted_name,
                             t.family,
                             t.genus,
-                            2 AS priority
-                        FROM public.orchid_taxonomy t
-                        JOIN selected s
-                          ON lower(trim(split_part(regexp_replace(COALESCE(NULLIF(t.accepted_scientific_name, ''), t.scientific_name), '\s*\(.*$', ''), ',', 1))) = s.normalized_name
-                    ),
-                    best_taxonomy AS (
-                        SELECT *
-                        FROM (
-                            SELECT * FROM direct_taxonomy
-                            UNION ALL
-                            SELECT * FROM normalized_taxonomy
-                        ) z
-                        ORDER BY priority, accepted_name
-                        LIMIT 1
-                    ),
-                    best_dossier AS (
-                        SELECT
-                            d.accepted_scientific_name,
-                            d.accepted_scientific_name_html
-                        FROM oc_taxonomy.species_dossier_v2 d
-                        JOIN selected s
-                          ON lower(trim(d.accepted_scientific_name)) = s.normalized_name
-                        LIMIT 1
-                    ),
-                    best_habitat AS (
-                        SELECT
-                            h.canonical_name,
-                            h.habitat_description,
-                            h.light_conditions,
-                            h.moisture_conditions,
-                            h.min_elevation_m,
-                            h.max_elevation_m
-                        FROM oc_habitat.species_habitat_profile h
-                        JOIN best_taxonomy bt
-                          ON h.accepted_taxon_id = bt.id
-                        LIMIT 1
-                    )
-                    SELECT
-                        bt.id AS taxonomy_id,
-                        bt.accepted_name,
-                        bt.family AS taxonomy_family,
-                        bt.genus AS taxonomy_genus,
-                        bd.accepted_scientific_name_html,
-                        bh.canonical_name AS habitat_name,
-                        bh.habitat_description,
-                        bh.light_conditions,
-                        bh.moisture_conditions,
-                        bh.min_elevation_m,
-                        bh.max_elevation_m
-                    FROM best_taxonomy bt
-                    FULL OUTER JOIN best_dossier bd ON TRUE
-                    FULL OUTER JOIN best_habitat bh ON TRUE
-                    LIMIT 1
-                    """,
-                    {"scientific_name": scientific_name},
-                )
-                enrich_row = cur.fetchone()
-
-        display_name = scientific_name
-        habitat_text = None
-
-        if enrich_row:
-            if enrich_row.get("accepted_name"):
-                display_name = enrich_row["accepted_name"]
-            if enrich_row.get("accepted_scientific_name_html"):
-                # Keep plain display_name simple; HTML can be exposed separately if needed later.
-                pass
-
-            habitat_bits = []
-            if enrich_row.get("habitat_description"):
-                habitat_bits.append(enrich_row["habitat_description"])
-            if enrich_row.get("light_conditions"):
-                habitat_bits.append(f"Light: {enrich_row['light_conditions']}")
-            if enrich_row.get("moisture_conditions"):
-                habitat_bits.append(f"Moisture: {enrich_row['moisture_conditions']}")
-            if enrich_row.get("min_elevation_m") is not None or enrich_row.get("max_elevation_m") is not None:
-                min_elev = enrich_row.get("min_elevation_m")
-                max_elev = enrich_row.get("max_elevation_m")
-                if min_elev is not None and max_elev is not None:
-                    habitat_bits.append(f"Elevation: {int(to_json_number(min_elev))}–{int(to_json_number(max_elev))} m")
-                elif min_elev is not None:
-                    habitat_bits.append(f"Elevation: from {int(to_json_number(min_elev))} m")
-                elif max_elev is not None:
-                    habitat_bits.append(f"Elevation: up to {int(to_json_number(max_elev))} m")
-            habitat_text = " | ".join(habitat_bits) if habitat_bits else None
-
-        caption = build_caption(
-            display_name=display_name,
-            family=family,
-            region=region,
-            habitat=habitat_text,
-            image_count=image_count,
-        )
-
-        return {
-            "widget": "orchid_of_the_day",
-            "display_name": display_name,
-            "scientific_name": scientific_name,
-            "genus": genus,
-            "family": family,
-            "hero_image_url": hero_image_url,
-            "images": images,
-            "caption": caption,
-            "region": region,
-            "habitat": habitat_text,
-            "image_count": image_count,
-        }
-
-    except psycopg.errors.UndefinedTable as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "A required widget table or view is missing. Ensure these database objects exist: "
-                "public.oc_species_display_gallery_view, public.oc_species_flower_gallery_view, "
-                "public.orchid_taxonomy, oc_taxonomy.species_dossier_v2, "
-                "oc_habitat.species_habitat_profile, oc_atlas.occurrences"
-            ),
-        ) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Orchid of the day query failed: {exc}",
-        ) from exc
-
-
-@app.get("/api/orchid-atlas")
-def orchid_atlas(
-    mode: str = Query(default="species"),
-    min_records: int = Query(default=1, ge=1),
-    min_species: int = Query(default=1, ge=1),
-    limit: int = Query(default=5000, ge=1, le=100000),
-) -> dict[str, Any]:
-    if mode not in {"species", "records"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid mode. Allowed values: 'species' or 'records'.",
-        )
-
-    order_sql = (
-        "species_count DESC, records DESC"
-        if mode == "species"
-        else "records DESC, species_count DESC"
-    )
-
-    sql = f"""
-        SELECT
-            lat_band,
-            lon_band,
-            records,
-            species_count,
-            genus_count,
-            min_elevation_m,
-            max_elevation_m,
-            country_count,
-            first_record_at,
-            last_record_at
-        FROM public.orchid_atlas_layer
-        WHERE records >= %(min_records)s
-          AND species_count >= %(min_species)s
-        ORDER BY {order_sql}, lat_band, lon_band
-        LIMIT %(limit)s
-    """
-
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    sql,
-                    {
-                        "min_records": min_records,
-                        "min_species": min_species,
-                        "limit": limit,
-                    },
-                )
-                rows = cur.fetchall()
-
-        cells = [
-            {
-                "lat": float(to_json_number(row["lat_band"])),
-                "lon": float(to_json_number(row["lon_band"])),
-                "records": int(to_json_number(row["records"])),
-                "species_count": int(to_json_number(row["species_count"])),
-                "genus_count": int(to_json_number(row["genus_count"])),
-                "min_elevation_m": to_json_number(row["min_elevation_m"]),
-                "max_elevation_m": to_json_number(row["max_elevation_m"]),
-                "country_count": int(to_json_number(row["country_count"])),
-                "first_record_at": (
-                    row["first_record_at"].isoformat()
-                    if row["first_record_at"] is not None
-                    else None
-                ),
-                "last_record_at": (
-                    row["last_record_at"].isoformat()
-                    if row["last_record_at"] is not None
-                    else None
-                ),
-            }
-            for row in rows
-        ]
-
-        return {
-            "ok": True,
-            "mode": mode,
-            "count": len(cells),
-            "filters": {
-                "min_records": min_records,
-                "min_species": min_species,
-                "limit": limit,
-            },
-            "cells": cells,
-        }
-    except psycopg.errors.UndefinedTable as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Atlas layer is missing. Ensure these database objects exist: public.orchid_atlas_layer.",
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Atlas query failed: {exc}") from exc
-
-
-@app.get("/api/orchid-atlas/top")
-def orchid_atlas_top(
-    limit: int = Query(default=25, ge=1, le=500),
-) -> dict[str, Any]:
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        lat_band,
-                        lon_band,
-                        records,
-                        species_count,
-                        genus_count,
-                        min_elevation_m,
-                        max_elevation_m,
-                        country_count,
-                        first_record_at,
-                        last_record_at
-                    FROM public.orchid_atlas_layer
-                    ORDER BY species_count DESC, records DESC, lat_band, lon_band
-                    LIMIT %(limit)s
-                    """,
-                    {"limit": limit},
-                )
-                rows = cur.fetchall()
-
-        return {
-            "ok": True,
-            "count": len(rows),
-            "cells": [
-                {
-                    "lat": float(to_json_number(row["lat_band"])),
-                    "lon": float(to_json_number(row["lon_band"])),
-                    "records": int(to_json_number(row["records"])),
-                    "species_count": int(to_json_number(row["species_count"])),
-                    "genus_count": int(to_json_number(row["genus_count"])),
-                    "min_elevation_m": to_json_number(row["min_elevation_m"]),
-                    "max_elevation_m": to_json_number(row["max_elevation_m"]),
-                    "country_count": int(to_json_number(row["country_count"])),
-                    "first_record_at": (
-                        row["first_record_at"].isoformat()
-                        if row["first_record_at"] is not None
-                        else None
-                    ),
-                    "last_record_at": (
-                        row["last_record_at"].isoformat()
-                        if row["last_record_at"] is not None
-                        else None
-                    ),
-                }
-                for row in rows
-            ],
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Top atlas query failed: {exc}") from exc
-
-
-@app.get("/api/orchid-atlas/geojson")
-def orchid_atlas_geojson(
-    mode: str = Query(default="species"),
-    min_records: int = Query(default=1, ge=1),
-    min_species: int = Query(default=1, ge=1),
-    limit: int = Query(default=5000, ge=1, le=100000),
-) -> JSONResponse:
-    if mode not in {"species", "records"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid mode. Allowed values: 'species' or 'records'.",
-        )
-
-    order_sql = (
-        "species_count DESC, records DESC"
-        if mode == "species"
-        else "records DESC, species_count DESC"
-    )
-
-    sql = f"""
-        SELECT
-            lat_band,
-            lon_band,
-            records,
-            species_count,
-            genus_count,
-            min_elevation_m,
-            max_elevation_m,
-            country_count,
-            first_record_at,
-            last_record_at
-        FROM public.orchid_atlas_layer
-        WHERE records >= %(min_records)s
-          AND species_count >= %(min_species)s
-        ORDER BY {order_sql}, lat_band, lon_band
-        LIMIT %(limit)s
-    """
-
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    sql,
-                    {
-                        "min_records": min_records,
-                        "min_species": min_species,
-                        "limit": limit,
-                    },
-                )
-                rows = cur.fetchall()
-
-        features = []
-        for row in rows:
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [
-                            float(to_json_number(row["lon_band"])),
-                            float(to_json_number(row["lat_band"])),
-                        ],
-                    },
-                    "properties": {
-                        "records": int(to_json_number(row["records"])),
-                        "species_count": int(to_json_number(row["species_count"])),
-                        "genus_count": int(to_json_number(row["genus_count"])),
-                        "min_elevation_m": to_json_number(row["min_elevation_m"]),
-                        "max_elevation_m": to_json_number(row["max_elevation_m"]),
-                        "country_count": int(to_json_number(row["country_count"])),
-                        "first_record_at": (
-                            row["first_record_at"].isoformat()
-                            if row["first_record_at"] is not None
-                            else None
-                        ),
-                        "last_record_at": (
-                            row["last_record_at"].isoformat()
-                            if row["last_record_at"] is not None
-                            else None
-                        ),
-                    },
-                }
-            )
-
-        return JSONResponse(
-            content={
-                "type": "FeatureCollection",
-                "mode": mode,
-                "count": len(features),
-                "features": features,
-            }
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Atlas GeoJSON query failed: {exc}") from exc
+                            2 AS
