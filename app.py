@@ -9,12 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum API"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
-
-# ================================
-# APP INIT
-# ================================
 
 app = FastAPI(
     title=APP_TITLE,
@@ -30,10 +26,6 @@ app.add_middleware(
 )
 
 
-# ================================
-# DATABASE
-# ================================
-
 def get_database_url() -> str:
     db_url = os.getenv("DATABASE_URL", "").strip()
     if not db_url:
@@ -44,10 +36,6 @@ def get_database_url() -> str:
 def get_conn() -> psycopg.Connection:
     return psycopg.connect(get_database_url(), row_factory=dict_row)
 
-
-# ================================
-# BASIC ROUTES
-# ================================
 
 @app.get("/")
 def root() -> dict[str, Any]:
@@ -90,57 +78,35 @@ def db_ping() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Database ping failed: {exc}") from exc
 
 
-# ================================
-# FEATURED GALLERY
-# ================================
-
 @app.get("/api/orchid-widgets/featured-gallery")
 def featured_gallery(
     limit: int = Query(default=6, ge=1, le=48),
-    randomize: bool = Query(default=False),
 ) -> dict[str, Any]:
     """
-    Schema-audited version:
-    orchid_images has:
-      - taxonomy_id
-      - image_url
-      - image_source
-      - image_type
-    orchid_taxonomy has:
-      - id
-      - scientific_name
-      - canonical_name
-      - full_scientific_name
-      - genus
-      - family_name
+    Minimal schema-safe version:
+    - orchid_taxonomy.id
+    - orchid_taxonomy.scientific_name
+    - orchid_images.taxonomy_id
+    - orchid_images.image_url
     """
     try:
-        order_clause = "random()" if randomize else "t.id DESC, i.id DESC"
-
-        sql = f"""
-        SELECT
-            t.id,
-            COALESCE(
-                NULLIF(t.canonical_name, ''),
-                NULLIF(t.scientific_name, ''),
-                NULLIF(t.full_scientific_name, '')
-            ) AS scientific_name,
-            t.genus,
-            t.family_name AS family,
-            i.image_url,
-            i.image_source,
-            i.image_type
-        FROM orchid_images i
-        JOIN orchid_taxonomy t
-          ON i.taxonomy_id = t.id
-        WHERE i.image_url IS NOT NULL
-        ORDER BY {order_clause}
-        LIMIT %s
-        """
-
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (limit,))
+                cur.execute(
+                    """
+                    SELECT
+                        t.id,
+                        t.scientific_name,
+                        i.image_url
+                    FROM orchid_images i
+                    JOIN orchid_taxonomy t
+                      ON i.taxonomy_id = t.id
+                    WHERE i.image_url IS NOT NULL
+                    ORDER BY t.id DESC, i.id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
                 rows = cur.fetchall()
 
         cards = [
@@ -148,11 +114,7 @@ def featured_gallery(
                 "id": row["id"],
                 "scientific_name": row["scientific_name"],
                 "display_name": row["scientific_name"],
-                "genus": row["genus"],
-                "family": row["family"],
                 "hero_image_url": row["image_url"],
-                "image_source": row["image_source"],
-                "image_type": row["image_type"],
             }
             for row in rows
         ]
@@ -167,75 +129,69 @@ def featured_gallery(
         raise HTTPException(status_code=500, detail=f"Featured gallery failed: {exc}") from exc
 
 
-# ================================
-# REGION PROFILE
-# ================================
-
 @app.get("/api/orchid-widgets/region-profile")
 def region_profile(
     value: str = Query(..., description="region slug or region name"),
 ) -> dict[str, Any]:
-    """
-    Returns region profile + habitats + media from oc_regions.
-    """
     try:
-        sql = """
-        WITH target AS (
-            SELECT *
-            FROM oc_regions.region_profiles
-            WHERE lower(region_slug) = lower(%s)
-               OR lower(region_name) = lower(%s)
-            LIMIT 1
-        ),
-        habitats AS (
-            SELECT
-                habitat_name,
-                habitat_description,
-                image_url,
-                image_caption,
-                sort_order
-            FROM oc_regions.region_habitats
-            WHERE region_slug = (SELECT region_slug FROM target)
-            ORDER BY sort_order
-        ),
-        media AS (
-            SELECT
-                media_type,
-                media_url,
-                caption,
-                credit,
-                sort_order
-            FROM oc_regions.region_media
-            WHERE region_slug = (SELECT region_slug FROM target)
-            ORDER BY sort_order
-        )
-        SELECT
-            t.region_slug,
-            t.region_name,
-            t.scope,
-            t.parent_region_slug,
-            t.continent_name,
-            t.country_name,
-            t.display_order,
-            t.is_featured,
-            t.short_description,
-            t.orchid_significance,
-            t.habitat_summary,
-            t.climate_summary,
-            t.elevation_summary,
-            t.conservation_summary,
-            t.hero_image_url,
-            t.hero_image_caption,
-            t.video_url,
-            t.source_note,
-            COALESCE((SELECT json_agg(h) FROM habitats h), '[]'::json) AS habitats,
-            COALESCE((SELECT json_agg(m) FROM media m), '[]'::json) AS media
-        FROM target t
-        """
-
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (value, value))
+                cur.execute(
+                    """
+                    WITH target AS (
+                        SELECT *
+                        FROM oc_regions.region_profiles
+                        WHERE lower(region_slug) = lower(%s)
+                           OR lower(region_name) = lower(%s)
+                        LIMIT 1
+                    ),
+                    habitats AS (
+                        SELECT
+                            habitat_name,
+                            habitat_description,
+                            image_url,
+                            image_caption,
+                            sort_order
+                        FROM oc_regions.region_habitats
+                        WHERE region_slug = (SELECT region_slug FROM target)
+                        ORDER BY sort_order
+                    ),
+                    media AS (
+                        SELECT
+                            media_type,
+                            media_url,
+                            caption,
+                            credit,
+                            sort_order
+                        FROM oc_regions.region_media
+                        WHERE region_slug = (SELECT region_slug FROM target)
+                        ORDER BY sort_order
+                    )
+                    SELECT
+                        t.region_slug,
+                        t.region_name,
+                        t.scope,
+                        t.parent_region_slug,
+                        t.continent_name,
+                        t.country_name,
+                        t.display_order,
+                        t.is_featured,
+                        t.short_description,
+                        t.orchid_significance,
+                        t.habitat_summary,
+                        t.climate_summary,
+                        t.elevation_summary,
+                        t.conservation_summary,
+                        t.hero_image_url,
+                        t.hero_image_caption,
+                        t.video_url,
+                        t.source_note,
+                        COALESCE((SELECT json_agg(h) FROM habitats h), '[]'::json) AS habitats,
+                        COALESCE((SELECT json_agg(m) FROM media m), '[]'::json) AS media
+                    FROM target t
+                    """,
+                    (value, value),
+                )
                 row = cur.fetchone()
 
         if not row:
