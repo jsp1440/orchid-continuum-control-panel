@@ -1,0 +1,33 @@
+@app.get("/api/orchid-widgets/featured-gallery")
+def featured_gallery(limit: int = 6):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        t.id,
+                        t.accepted_scientific_name,
+                        i.image_url
+                    FROM orchid_taxonomy t
+                    JOIN orchid_images i 
+                        ON t.id = i.taxonomy_id
+                    WHERE i.image_url IS NOT NULL
+                    LIMIT %s
+                """, (limit,))
+
+                rows = cur.fetchall()
+
+                return {
+                    "ok": True,
+                    "count": len(rows),
+                    "items": [
+                        {
+                            "id": r[0],
+                            "name": r[1],
+                            "image": r[2]
+                        } for r in rows
+                    ]
+                }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
