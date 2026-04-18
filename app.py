@@ -9,12 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum API"
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 
-
-# ================================
-# APP INIT
-# ================================
 
 app = FastAPI(
     title=APP_TITLE,
@@ -29,10 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ================================
-# DATABASE
-# ================================
 
 def get_database_url() -> str:
     db_url = os.getenv("DATABASE_URL", "").strip()
@@ -60,37 +52,6 @@ def fetch_columns(conn: psycopg.Connection, schema_name: str, table_name: str) -
         return {row["column_name"] for row in cur.fetchall()}
 
 
-def table_exists(conn: psycopg.Connection, schema_name: str, table_name: str) -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = %s
-                  AND table_name = %s
-            ) AS ok
-            """,
-            (schema_name, table_name),
-        )
-        row = cur.fetchone()
-        return bool(row and row["ok"])
-
-
-def first_existing_table(conn: psycopg.Connection, schema_name: str, candidates: list[str]) -> str | None:
-    for name in candidates:
-        if table_exists(conn, schema_name, name):
-            return name
-    return None
-
-
-def first_existing_column(columns: set[str], candidates: list[str]) -> str | None:
-    for name in candidates:
-        if name in columns:
-            return name
-    return None
-
-
 def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
     candidates = []
     for col in ["scientific_name", "full_scientific_name", "canonical_name", "accepted_scientific_name"]:
@@ -99,7 +60,7 @@ def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
 
     if not candidates:
         raise RuntimeError(
-            "Could not find any usable taxonomy name column. "
+            "Could not find a usable taxonomy name column. "
             "Expected one of: scientific_name, full_scientific_name, canonical_name, accepted_scientific_name"
         )
 
@@ -108,10 +69,6 @@ def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
 
     return f"COALESCE({', '.join(candidates)})"
 
-
-# ================================
-# BASIC ROUTES
-# ================================
 
 @app.get("/")
 def root() -> dict[str, Any]:
@@ -155,34 +112,29 @@ def db_ping() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Database ping failed: {exc}") from exc
 
 
-# ================================
-# FEATURED GALLERY
-# ================================
-
 @app.get("/api/orchid-widgets/featured-gallery")
 def featured_gallery(
     limit: int = Query(default=6, ge=1, le=48),
     randomize: bool = Query(default=False),
 ) -> dict[str, Any]:
-    """
-    Working, schema-safe featured gallery.
-    """
     try:
         with get_conn() as conn:
             tax_cols = fetch_columns(conn, "public", "orchid_taxonomy")
             name_expr = build_taxonomy_name_expr(tax_cols)
-
             order_clause = "random()" if randomize else "t.id DESC"
 
             sql = f"""
             SELECT
                 t.id,
                 {name_expr} AS scientific_name,
-                i.image_url
+                MIN(i.image_url) AS hero_image_url
             FROM public.orchid_images i
             JOIN public.orchid_taxonomy t
               ON i.taxonomy_id = t.id
             WHERE i.image_url IS NOT NULL
+            GROUP BY
+                t.id,
+                {name_expr}
             ORDER BY {order_clause}
             LIMIT %s
             """
@@ -199,7 +151,7 @@ def featured_gallery(
                     "id": r["id"],
                     "scientific_name": r["scientific_name"],
                     "display_name": r["scientific_name"],
-                    "hero_image_url": r["image_url"],
+                    "hero_image_url": r["hero_image_url"],
                 }
                 for r in rows
             ],
@@ -209,13 +161,9 @@ def featured_gallery(
         raise HTTPException(status_code=500, detail=f"Featured gallery failed: {exc}") from exc
 
 
-# ================================
-# REGION PROFILE
-# ================================
-
 @app.get("/api/orchid-widgets/region-profile")
 def region_profile(
-    value: str = Query(..., description="region slug or region name"),
+    value: str = Query(..., description="region slug, alias, or region name"),
 ) -> dict[str, Any]:
     try:
         with get_conn() as conn:
@@ -223,10 +171,19 @@ def region_profile(
                 cur.execute(
                     """
                     WITH target AS (
-                        SELECT *
-                        FROM oc_regions.region_profiles
-                        WHERE lower(region_slug) = lower(%s)
-                           OR lower(region_name) = lower(%s)
+                        SELECT rp.*
+                        FROM oc_regions.region_profiles rp
+                        WHERE lower(rp.region_slug) = lower(%s)
+                           OR lower(rp.region_name) = lower(%s)
+
+                        UNION ALL
+
+                        SELECT rp.*
+                        FROM oc_regions.region_aliases ra
+                        JOIN oc_regions.region_profiles rp
+                          ON rp.region_slug = ra.region_slug
+                        WHERE lower(ra.alias) = lower(%s)
+
                         LIMIT 1
                     ),
                     habitats AS (
@@ -274,7 +231,7 @@ def region_profile(
                         COALESCE((SELECT json_agg(m) FROM media m), '[]'::json) AS media
                     FROM target t
                     """,
-                    (value, value),
+                    (value, value, value),
                 )
                 row = cur.fetchone()
 
@@ -292,104 +249,147 @@ def region_profile(
         raise HTTPException(status_code=500, detail=f"Region profile failed: {exc}") from exc
 
 
-# ================================
-# ORCHIDS BY REGION
-# ================================
-
 @app.get("/api/orchid-widgets/orchids-by-region")
 def orchids_by_region(
-    scope: str = Query(..., description="country | continent | island"),
-    value: str = Query(..., description="Ecuador | South America | Borneo"),
+    scope: str = Query(..., description="country | region | island | continent"),
+    value: str = Query(..., description="Ecuador | Borneo | South America"),
     limit: int = Query(default=24, ge=1, le=200),
 ) -> dict[str, Any]:
-    """
-    Schema-aware region endpoint.
-    It inspects the occurrence table/view and chooses verified columns at runtime.
-    """
     try:
-        scope = scope.strip().lower()
-        if scope not in {"country", "continent", "island"}:
-            raise HTTPException(status_code=400, detail="scope must be one of: country, continent, island")
+        normalized_scope = scope.strip().lower()
+
+        if normalized_scope not in {"country", "region", "island", "continent"}:
+            raise HTTPException(
+                status_code=400,
+                detail="scope must be one of: country, region, island, continent",
+            )
 
         with get_conn() as conn:
-            occurrence_table = first_existing_table(
-                conn,
-                "public",
-                ["orchid_occurrence", "orchid_occurrences", "v_orchid_records"],
-            )
-            if not occurrence_table:
-                raise RuntimeError(
-                    "Could not find a usable occurrence source table/view. "
-                    "Tried: orchid_occurrence, orchid_occurrences, v_orchid_records"
-                )
-
-            occ_cols = fetch_columns(conn, "public", occurrence_table)
             tax_cols = fetch_columns(conn, "public", "orchid_taxonomy")
-
-            occ_taxonomy_col = first_existing_column(
-                occ_cols,
-                ["taxonomy_id", "taxon_id", "accepted_taxon_id"],
-            )
-            if not occ_taxonomy_col:
-                raise RuntimeError(
-                    f"Could not find a taxonomy join column in public.{occurrence_table}. "
-                    "Expected one of: taxonomy_id, taxon_id, accepted_taxon_id"
-                )
-
-            scope_map = {
-                "country": ["country", "country_name"],
-                "continent": ["continent", "continent_name"],
-                "island": ["island", "region_name", "region"],
-            }
-            occ_region_col = first_existing_column(occ_cols, scope_map[scope])
-            if not occ_region_col:
-                raise RuntimeError(
-                    f"Could not find a usable {scope} column in public.{occurrence_table}. "
-                    f"Tried: {', '.join(scope_map[scope])}"
-                )
-
+            occ_cols = fetch_columns(conn, "public", "orchid_occurrence")
             name_expr = build_taxonomy_name_expr(tax_cols)
 
-            sql = f"""
-            SELECT
-                t.id,
-                {name_expr} AS scientific_name,
-                MIN(o.{occ_region_col}) AS region_value,
-                MIN(i.image_url) AS hero_image_url
-            FROM public.{occurrence_table} o
-            JOIN public.orchid_taxonomy t
-              ON o.{occ_taxonomy_col} = t.id
-            LEFT JOIN public.orchid_images i
-              ON i.taxonomy_id = t.id
-            WHERE lower(COALESCE(o.{occ_region_col}, '')) = lower(%s)
-              AND i.image_url IS NOT NULL
-            GROUP BY
-                t.id,
-                {name_expr}
-            ORDER BY t.id DESC
-            LIMIT %s
-            """
+            if "taxonomy_id" not in occ_cols:
+                raise RuntimeError("public.orchid_occurrence is missing taxonomy_id")
+            if "country" not in occ_cols:
+                raise RuntimeError("public.orchid_occurrence is missing country")
+            if "region" not in occ_cols:
+                raise RuntimeError("public.orchid_occurrence is missing region")
+
+            if normalized_scope == "country":
+                sql = f"""
+                SELECT
+                    t.id,
+                    {name_expr} AS scientific_name,
+                    MIN(o.country) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                JOIN public.orchid_taxonomy t
+                  ON o.taxonomy_id = t.id
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = t.id
+                WHERE lower(COALESCE(o.country, '')) = lower(%s)
+                  AND i.image_url IS NOT NULL
+                GROUP BY
+                    t.id,
+                    {name_expr}
+                ORDER BY t.id DESC
+                LIMIT %s
+                """
+                params = (value, limit)
+                match_strategy = "direct_country"
+
+            elif normalized_scope in {"region", "island"}:
+                sql = f"""
+                SELECT
+                    t.id,
+                    {name_expr} AS scientific_name,
+                    MIN(COALESCE(o.region, o.country)) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                JOIN public.orchid_taxonomy t
+                  ON o.taxonomy_id = t.id
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = t.id
+                WHERE (
+                        lower(COALESCE(o.region, '')) = lower(%s)
+                     OR lower(COALESCE(o.country, '')) = lower(%s)
+                )
+                  AND i.image_url IS NOT NULL
+                GROUP BY
+                    t.id,
+                    {name_expr}
+                ORDER BY t.id DESC
+                LIMIT %s
+                """
+                params = (value, value, limit)
+                match_strategy = "direct_region_or_country"
+
+            else:  # continent
+                sql = f"""
+                SELECT
+                    t.id,
+                    {name_expr} AS scientific_name,
+                    MIN(o.country) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                JOIN public.orchid_taxonomy t
+                  ON o.taxonomy_id = t.id
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = t.id
+                WHERE lower(COALESCE(o.country, '')) IN (
+                    SELECT lower(rp.country_name)
+                    FROM oc_regions.region_profiles rp
+                    WHERE rp.scope = 'country'
+                      AND lower(COALESCE(rp.continent_name, '')) = lower(%s)
+                      AND rp.country_name IS NOT NULL
+                )
+                  AND i.image_url IS NOT NULL
+                GROUP BY
+                    t.id,
+                    {name_expr}
+                ORDER BY t.id DESC
+                LIMIT %s
+                """
+                params = (value, limit)
+                match_strategy = "continent_via_curated_country_mapping"
 
             with conn.cursor() as cur:
-                cur.execute(sql, (value, limit))
+                cur.execute(sql, params)
                 rows = cur.fetchall()
 
-        return {
+        orchids = [
+            {
+                "id": r["id"],
+                "scientific_name": r["scientific_name"],
+                "display_name": r["scientific_name"],
+                "matched_value": r["matched_value"],
+                "hero_image_url": r["hero_image_url"],
+            }
+            for r in rows
+        ]
+
+        response: dict[str, Any] = {
             "widget": "orchids_by_region",
-            "scope": scope,
+            "scope": normalized_scope,
             "value": value,
-            "count": len(rows),
-            "orchids": [
-                {
-                    "id": r["id"],
-                    "scientific_name": r["scientific_name"],
-                    "display_name": r["scientific_name"],
-                    "region_value": r["region_value"],
-                    "hero_image_url": r["hero_image_url"],
-                }
-                for r in rows
-            ],
+            "count": len(orchids),
+            "match_strategy": match_strategy,
+            "orchids": orchids,
         }
+
+        if normalized_scope == "island" and len(orchids) == 0:
+            response["mapping_note"] = (
+                "No direct matches were found in orchid_occurrence.region or orchid_occurrence.country "
+                f"for '{value}'. This usually means the data is not explicitly labeled with that island name."
+            )
+
+        if normalized_scope == "continent" and len(orchids) == 0:
+            response["mapping_note"] = (
+                "No curated country-to-continent matches were found for this continent in oc_regions.region_profiles."
+            )
+
+        return response
 
     except HTTPException:
         raise
