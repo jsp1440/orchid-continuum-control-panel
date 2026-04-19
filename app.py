@@ -1,152 +1,516 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import psycopg
-import os
-import random
+#!/usr/bin/env python3
 
-app = FastAPI()
+import os
+from pathlib import Path
+
+import psycopg
+from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from psycopg.rows import dict_row
+
+APP_TITLE = "Orchid Continuum API"
+APP_VERSION = "1.7"
+
+app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# -------------------------
-# DB CONNECTION
-# -------------------------
+
 def get_conn():
-    return psycopg.connect(DATABASE_URL)
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL not set")
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
-# -------------------------
-# IMAGE FALLBACK
-# -------------------------
-def get_fallback_image():
-    return "https://upload.wikimedia.org/wikipedia/commons/9/9d/Orchidaceae_-_flower.jpg"
 
-# -------------------------
-# IMAGE POOL HELPER
-# -------------------------
-def get_image_pool(n: int = 10) -> list:
-    """Pull up to n real image URLs from orchid_images. Returns list of URLs."""
+def fetch_columns(conn, schema_name: str, table_name: str) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            (schema_name, table_name),
+        )
+        return {row["column_name"] for row in cur.fetchall()}
+
+
+def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
+    candidates = []
+    for col in ["scientific_name", "full_scientific_name", "canonical_name", "accepted_scientific_name"]:
+        if col in tax_cols:
+            candidates.append(f"NULLIF(t.{col}, '')")
+
+    if not candidates:
+        raise RuntimeError("Could not find a usable taxonomy name column in orchid_taxonomy")
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    return f"COALESCE({', '.join(candidates)})"
+
+
+def find_atlas_html() -> Path:
+    base_dir = Path(__file__).resolve().parent
+    candidates = [
+        base_dir / "atlas.html",
+        base_dir / "static" / "atlas.html",
+        base_dir / "templates" / "atlas.html",
+    ]
+
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+
+    raise HTTPException(
+        status_code=404,
+        detail="atlas.html not found in app root, static/, or templates/",
+    )
+
+
+@app.get("/")
+def root():
+    return {
+        "service": APP_TITLE,
+        "version": APP_VERSION,
+        "status": "running",
+    }
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/db/ping")
+def db_ping():
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT image_url
-                    FROM orchid_images
-                    WHERE image_url IS NOT NULL AND image_url != ''
-                    ORDER BY RANDOM()
-                    LIMIT %s
-                """, (n,))
+                cur.execute(
+                    """
+                    SELECT
+                        current_database()::text AS database_name,
+                        current_schema()::text AS schema_name,
+                        current_user::text AS db_user
+                    """
+                )
+                row = cur.fetchone()
+
+        return {
+            "ok": True,
+            "database": row["database_name"],
+            "schema": row["schema_name"],
+            "db_user": row["db_user"],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database ping failed: {exc}")
+
+
+@app.get("/atlas.html")
+def serve_atlas_html():
+    atlas_path = find_atlas_html()
+    return FileResponse(atlas_path, media_type="text/html")
+
+
+@app.get("/api/orchid-widgets/featured-gallery")
+def featured_gallery(
+    limit: int = Query(default=6, ge=1, le=48),
+    randomize: bool = Query(default=False),
+):
+    try:
+        with get_conn() as conn:
+            tax_cols = fetch_columns(conn, "public", "orchid_taxonomy")
+            name_expr = build_taxonomy_name_expr(tax_cols)
+            order_clause = "random()" if randomize else "t.id DESC"
+
+            sql = f"""
+            SELECT
+                t.id,
+                {name_expr} AS scientific_name,
+                MIN(i.image_url) AS hero_image_url
+            FROM public.orchid_images i
+            JOIN public.orchid_taxonomy t
+              ON i.taxonomy_id = t.id
+            WHERE i.image_url IS NOT NULL
+            GROUP BY t.id, {name_expr}
+            ORDER BY {order_clause}
+            LIMIT %s
+            """
+
+            with conn.cursor() as cur:
+                cur.execute(sql, (limit,))
                 rows = cur.fetchall()
-        return [r[0] for r in rows]
-    except Exception:
-        return []
 
-def pick_image(pool: list, used: set) -> str:
-    """Pick an unused image from pool, or fallback if exhausted."""
-    for url in pool:
-        if url not in used:
-            used.add(url)
-            return url
-    return get_fallback_image()
+        return {
+            "widget": "featured_gallery",
+            "count": len(rows),
+            "cards": [
+                {
+                    "id": r["id"],
+                    "scientific_name": r["scientific_name"],
+                    "display_name": r["scientific_name"],
+                    "hero_image_url": r["hero_image_url"],
+                }
+                for r in rows
+            ],
+        }
 
-# -------------------------
-# REGION PROFILE
-# -------------------------
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Featured gallery failed: {exc}")
+
+
 @app.get("/api/orchid-widgets/region-profile")
-def region_profile(value: str):
+def region_profile(
+    value: str = Query(..., description="region slug, alias, or region name"),
+):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH target AS (
+                        SELECT rp.*
+                        FROM oc_regions.region_profiles rp
+                        WHERE lower(rp.region_slug) = lower(%s)
+                           OR lower(rp.region_name) = lower(%s)
 
-    # Pull a small pool of real images from DB
-    pool = get_image_pool(10)
-    used = set()
+                        UNION ALL
 
-    hero_image_url = pick_image(pool, used) if pool else get_fallback_image()
+                        SELECT rp.*
+                        FROM oc_regions.region_aliases ra
+                        JOIN oc_regions.region_profiles rp
+                          ON rp.region_slug = ra.region_slug
+                        WHERE lower(ra.alias) = lower(%s)
 
-    habitats = [
-        {
-            "habitat_name": "Andean Cloud Forest",
-            "habitat_description": "Humid montane forest with high orchid diversity.",
-            "image_url": pick_image(pool, used) if pool else get_fallback_image()
-        },
-        {
-            "habitat_name": "Upper Amazonian Lowland Rainforest",
-            "habitat_description": "Warm wet rainforest with canopy epiphytes.",
-            "image_url": pick_image(pool, used) if pool else get_fallback_image()
-        },
-        {
-            "habitat_name": "Chocó Wet Forest",
-            "habitat_description": "Extremely wet biodiversity hotspot on the Pacific slope.",
-            "image_url": pick_image(pool, used) if pool else get_fallback_image()
+                        LIMIT 1
+                    ),
+                    habitats AS (
+                        SELECT
+                            habitat_name,
+                            habitat_description,
+                            image_url,
+                            image_caption,
+                            sort_order
+                        FROM oc_regions.region_habitats
+                        WHERE region_slug = (SELECT region_slug FROM target)
+                        ORDER BY sort_order
+                    ),
+                    media AS (
+                        SELECT
+                            media_type,
+                            media_url,
+                            caption,
+                            credit,
+                            sort_order
+                        FROM oc_regions.region_media
+                        WHERE region_slug = (SELECT region_slug FROM target)
+                        ORDER BY sort_order
+                    )
+                    SELECT
+                        t.region_slug,
+                        t.region_name,
+                        t.scope,
+                        t.parent_region_slug,
+                        t.continent_name,
+                        t.country_name,
+                        t.display_order,
+                        t.is_featured,
+                        t.short_description,
+                        t.orchid_significance,
+                        t.habitat_summary,
+                        t.climate_summary,
+                        t.elevation_summary,
+                        t.conservation_summary,
+                        t.hero_image_url,
+                        t.hero_image_caption,
+                        t.video_url,
+                        t.source_note,
+                        COALESCE((SELECT json_agg(h) FROM habitats h), '[]'::json) AS habitats,
+                        COALESCE((SELECT json_agg(m) FROM media m), '[]'::json) AS media
+                    FROM target t
+                    """,
+                    (value, value, value),
+                )
+                row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Region not found")
+
+        return {
+            "widget": "region_profile",
+            "region": row,
         }
-    ]
 
-    return {
-        "region": {
-            "region_name": value,
-            "continent_name": "South America",
-            "short_description": f"{value} is one of the richest orchid regions in the world.",
-            "orchid_significance": "Major center of orchid diversity.",
-            "habitat_summary": "Cloud forests, lowlands, and wet forests.",
-            "climate_summary": "Tropical to montane climates.",
-            "elevation_summary": "Sea level to high Andes.",
-            "conservation_summary": "Deforestation and climate threats.",
-            "hero_image_url": hero_image_url,
-            "habitats": habitats
-        }
-    }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Region profile failed: {exc}")
 
-# -------------------------
-# ORCHIDS BY REGION (WORKING + IMAGE SAFE)
-# -------------------------
+
 @app.get("/api/orchid-widgets/orchids-by-region")
-def orchids_by_region(scope: str, value: str, limit: int = 12):
+def orchids_by_region(
+    scope: str = Query(..., description="country | region | island | continent"),
+    value: str = Query(..., description="Ecuador | Borneo | South America"),
+    limit: int = Query(default=24, ge=1, le=200),
+):
+    try:
+        normalized_scope = scope.strip().lower()
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT 
-                    scientific_name,
-                    COALESCE(image_url, '') 
-                FROM orchid_images
+        if normalized_scope not in {"country", "region", "island", "continent"}:
+            raise HTTPException(
+                status_code=400,
+                detail="scope must be one of: country, region, island, continent",
+            )
+
+        with get_conn() as conn:
+            occ_cols = fetch_columns(conn, "public", "orchid_occurrence")
+
+            required_occ = {"taxonomy_id", "country", "region", "scientific_name"}
+            missing = sorted(required_occ - occ_cols)
+            if missing:
+                raise RuntimeError(
+                    f"public.orchid_occurrence is missing required columns: {', '.join(missing)}"
+                )
+
+            if normalized_scope == "country":
+                sql = """
+                SELECT
+                    o.taxonomy_id AS id,
+                    COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid') AS scientific_name,
+                    MIN(o.country) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = o.taxonomy_id
+                WHERE lower(COALESCE(o.country, '')) = lower(%s)
+                  AND i.image_url IS NOT NULL
+                GROUP BY o.taxonomy_id, COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid')
+                ORDER BY o.taxonomy_id DESC
                 LIMIT %s
-            """, (limit,))
+                """
+                params = (value, limit)
+                match_strategy = "direct_country"
 
-            rows = cur.fetchall()
+            elif normalized_scope in {"region", "island"}:
+                sql = """
+                SELECT
+                    o.taxonomy_id AS id,
+                    COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid') AS scientific_name,
+                    MIN(COALESCE(o.region, o.country)) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = o.taxonomy_id
+                WHERE (
+                        lower(COALESCE(o.region, '')) = lower(%s)
+                     OR lower(COALESCE(o.country, '')) = lower(%s)
+                     OR lower(COALESCE(o.country, '')) IN (
+                        SELECT lower(country_name)
+                        FROM oc_regions.region_country_members
+                        WHERE lower(region_slug) = lower(%s)
+                     )
+                )
+                  AND i.image_url IS NOT NULL
+                GROUP BY o.taxonomy_id, COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid')
+                ORDER BY o.taxonomy_id DESC
+                LIMIT %s
+                """
+                params = (value, value, value, limit)
+                match_strategy = "direct_region_country_or_curated_membership"
 
-    orchids = []
-    for r in rows:
-        orchids.append({
-            "display_name": r[0],
-            "matched_value": value,
-            "hero_image_url": r[1] if r[1] else get_fallback_image()
-        })
+            else:
+                sql = """
+                SELECT
+                    o.taxonomy_id AS id,
+                    COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid') AS scientific_name,
+                    MIN(o.country) AS matched_value,
+                    MIN(i.image_url) AS hero_image_url
+                FROM public.orchid_occurrence o
+                LEFT JOIN public.orchid_images i
+                  ON i.taxonomy_id = o.taxonomy_id
+                WHERE lower(COALESCE(o.country, '')) IN (
+                    SELECT lower(rcm.country_name)
+                    FROM oc_regions.region_country_members rcm
+                    WHERE lower(rcm.region_slug) = lower(%s)
+                )
+                  AND i.image_url IS NOT NULL
+                GROUP BY o.taxonomy_id, COALESCE(NULLIF(o.scientific_name, ''), 'Unknown orchid')
+                ORDER BY o.taxonomy_id DESC
+                LIMIT %s
+                """
+                continent_slug = value.strip().lower().replace(" ", "-")
+                params = (continent_slug, limit)
+                match_strategy = "continent_via_region_country_members"
 
-    return {
-        "count": len(orchids),
-        "orchids": orchids
-    }
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
 
-# -------------------------
-# REGION INTELLIGENCE (UNCHANGED)
-# -------------------------
-@app.get("/api/orchid-widgets/region-intelligence")
-def region_intelligence(scope: str, value: str):
+        orchids = [
+            {
+                "id": r["id"],
+                "scientific_name": r["scientific_name"],
+                "display_name": r["scientific_name"],
+                "matched_value": r["matched_value"],
+                "hero_image_url": r["hero_image_url"],
+            }
+            for r in rows
+        ]
 
-    return {
-        "summary": {
-            "species_count": 7,
-            "occurrence_count": 9,
-            "genus_count": 2,
-            "endemic_proxy_species_count": 7,
-            "top_genera": [
-                {"genus": "Epidendrum"},
-                {"genus": "Oncidium"}
-            ]
+        response = {
+            "widget": "orchids_by_region",
+            "scope": normalized_scope,
+            "value": value,
+            "count": len(orchids),
+            "match_strategy": match_strategy,
+            "orchids": orchids,
         }
-    }
+
+        if normalized_scope in {"region", "island"} and len(orchids) == 0:
+            response["mapping_note"] = (
+                "No direct or curated matches were found for this region/island in orchid_occurrence."
+            )
+
+        if normalized_scope == "continent" and len(orchids) == 0:
+            response["mapping_note"] = (
+                "No orchid_occurrence rows matched the curated country membership for this continent."
+            )
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Orchids by region failed: {exc}")
+
+
+@app.get("/api/orchid-widgets/region-intelligence")
+def region_intelligence(
+    scope: str = Query(..., description="country | continent"),
+    value: str = Query(..., description="Brazil | South America"),
+):
+    try:
+        normalized_scope = scope.strip().lower()
+        if normalized_scope not in {"country", "continent"}:
+            raise HTTPException(status_code=400, detail="scope must be one of: country, continent")
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        region_scope,
+                        region_name,
+                        parent_region_name,
+                        occurrence_count,
+                        species_count,
+                        taxonomy_count,
+                        genus_count,
+                        endemic_proxy_species_count,
+                        min_elevation_m,
+                        max_elevation_m,
+                        avg_elevation_m,
+                        georeferenced_occurrence_count,
+                        dominant_climate_preference,
+                        dominant_growth_habit,
+                        top_genera,
+                        created_at
+                    FROM oc_intelligence.v_region_species_summary
+                    WHERE lower(region_scope) = lower(%s)
+                      AND lower(region_name) = lower(%s)
+                    LIMIT 1
+                    """,
+                    (normalized_scope, value),
+                )
+                row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Region intelligence not found")
+
+        return {
+            "widget": "region_intelligence",
+            "scope": normalized_scope,
+            "value": value,
+            "summary": row,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Region intelligence failed: {exc}")
+
+
+@app.get("/api/orchid-widgets/top-regions")
+def top_regions(
+    scope: str = Query(..., description="country | continent"),
+    sort_by: str = Query(default="species_count", description="species_count | occurrence_count"),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    try:
+        normalized_scope = scope.strip().lower()
+        if normalized_scope not in {"country", "continent"}:
+            raise HTTPException(status_code=400, detail="scope must be one of: country, continent")
+
+        allowed_sorts = {"species_count", "occurrence_count"}
+        if sort_by not in allowed_sorts:
+            raise HTTPException(status_code=400, detail="sort_by must be one of: species_count, occurrence_count")
+
+        order_clause = (
+            "species_count DESC, occurrence_count DESC, region_name"
+            if sort_by == "species_count"
+            else "occurrence_count DESC, species_count DESC, region_name"
+        )
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT
+                        region_scope,
+                        region_name,
+                        occurrence_count,
+                        species_count,
+                        taxonomy_count,
+                        genus_count,
+                        endemic_proxy_species_count,
+                        min_elevation_m,
+                        max_elevation_m,
+                        avg_elevation_m,
+                        georeferenced_occurrence_count,
+                        dominant_climate_preference,
+                        dominant_growth_habit,
+                        top_genera,
+                        created_at
+                    FROM oc_intelligence.v_region_species_summary
+                    WHERE lower(region_scope) = lower(%s)
+                    ORDER BY {order_clause}
+                    LIMIT %s
+                    """,
+                    (normalized_scope, limit),
+                )
+                rows = cur.fetchall()
+
+        return {
+            "widget": "top_regions",
+            "scope": normalized_scope,
+            "sort_by": sort_by,
+            "count": len(rows),
+            "rows": rows,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Top regions failed: {exc}")
