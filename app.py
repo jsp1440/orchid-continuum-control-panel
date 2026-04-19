@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import os
+from pathlib import Path
+
+import psycopg
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from psycopg.rows import dict_row
-import psycopg
 
 APP_TITLE = "Orchid Continuum API"
 APP_VERSION = "1.7"
@@ -51,14 +53,30 @@ def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
             candidates.append(f"NULLIF(t.{col}, '')")
 
     if not candidates:
-        raise RuntimeError(
-            "Could not find a usable taxonomy name column in orchid_taxonomy"
-        )
+        raise RuntimeError("Could not find a usable taxonomy name column in orchid_taxonomy")
 
     if len(candidates) == 1:
         return candidates[0]
 
     return f"COALESCE({', '.join(candidates)})"
+
+
+def find_atlas_html() -> Path:
+    base_dir = Path(__file__).resolve().parent
+    candidates = [
+        base_dir / "atlas.html",
+        base_dir / "static" / "atlas.html",
+        base_dir / "templates" / "atlas.html",
+    ]
+
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+
+    raise HTTPException(
+        status_code=404,
+        detail="atlas.html not found in app root, static/, or templates/",
+    )
 
 
 @app.get("/")
@@ -102,9 +120,7 @@ def db_ping():
 
 @app.get("/atlas.html")
 def serve_atlas_html():
-    atlas_path = os.path.join(os.path.dirname(__file__), "atlas.html")
-    if not os.path.exists(atlas_path):
-        raise HTTPException(status_code=404, detail="atlas.html not found")
+    atlas_path = find_atlas_html()
     return FileResponse(atlas_path, media_type="text/html")
 
 
@@ -314,7 +330,7 @@ def orchids_by_region(
                 params = (value, value, value, limit)
                 match_strategy = "direct_region_country_or_curated_membership"
 
-            else:  # continent
+            else:
                 sql = """
                 SELECT
                     o.taxonomy_id AS id,
@@ -451,8 +467,11 @@ def top_regions(
         if sort_by not in allowed_sorts:
             raise HTTPException(status_code=400, detail="sort_by must be one of: species_count, occurrence_count")
 
-        order_clause = "species_count DESC, occurrence_count DESC, region_name" if sort_by == "species_count" \
+        order_clause = (
+            "species_count DESC, occurrence_count DESC, region_name"
+            if sort_by == "species_count"
             else "occurrence_count DESC, species_count DESC, region_name"
+        )
 
         with get_conn() as conn:
             with conn.cursor() as cur:
