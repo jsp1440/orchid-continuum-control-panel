@@ -455,6 +455,9 @@
 
   <script>
     (function () {
+      var FALLBACK_IMG = 'https://picsum.photos/seed/orchid/640/480';
+      var FALLBACK_HERO = 'https://picsum.photos/seed/orchid-hero/1200/400';
+
       var els = {
         apiBase: document.getElementById('apiBase'),
         scope: document.getElementById('scope'),
@@ -567,15 +570,13 @@
           return;
         }
 
-        els.habitatGrid.innerHTML = habitats.map(function (h) {
-          var imageHtml = '<div class="card-image">No image</div>';
-          if (h.image_url) {
-            imageHtml = '<div class="card-image"><img src="' + esc(h.image_url) + '" alt="' + esc(h.habitat_name || 'Habitat') + '"></div>';
-          }
-
+        els.habitatGrid.innerHTML = habitats.map(function (h, i) {
+          var src = h.image_url || (FALLBACK_IMG + i);
           return (
             '<div class="card">' +
-              imageHtml +
+              '<div class="card-image">' +
+                '<img src="' + esc(src) + '" alt="' + esc(h.habitat_name || 'Habitat') + '" onerror="this.onerror=null;this.parentNode.innerHTML=\'<img src=&quot;' + FALLBACK_IMG + i + '&quot; style=&quot;width:100%;height:100%;object-fit:cover;&quot;>\';">' +
+              '</div>' +
               '<div class="card-body">' +
                 '<div class="card-title">' + esc(h.habitat_name || 'Habitat') + '</div>' +
                 '<div class="card-meta">' + esc(h.habitat_description || '') + '</div>' +
@@ -591,15 +592,13 @@
           return;
         }
 
-        els.galleryGrid.innerHTML = items.map(function (o) {
-          var imageHtml = '<div class="card-image">No image</div>';
-          if (o.hero_image_url) {
-            imageHtml = '<div class="card-image"><img src="' + esc(o.hero_image_url) + '" alt="' + esc(o.display_name || o.scientific_name || 'Orchid') + '"></div>';
-          }
-
+        els.galleryGrid.innerHTML = items.map(function (o, i) {
+          var src = o.hero_image_url || (FALLBACK_IMG + 'g' + i);
           return (
             '<div class="card">' +
-              imageHtml +
+              '<div class="card-image">' +
+                '<img src="' + esc(src) + '" alt="' + esc(o.display_name || o.scientific_name || 'Orchid') + '" onerror="this.onerror=null;this.src=\'' + FALLBACK_IMG + 'g' + i + '\';">' +
+              '</div>' +
               '<div class="card-body">' +
                 '<div class="card-title">' + esc(o.display_name || o.scientific_name || 'Unknown orchid') + '</div>' +
                 '<div class="card-meta">' + esc(o.matched_value || '') + '</div>' +
@@ -667,13 +666,13 @@
           els.elevationSummary.textContent = r.elevation_summary || '';
           els.conservationSummary.textContent = r.conservation_summary || '';
 
-          if (r.hero_image_url) {
-            els.heroImage.src = r.hero_image_url;
-            els.heroImageWrap.style.display = 'block';
-          } else {
-            els.heroImage.removeAttribute('src');
-            els.heroImageWrap.style.display = 'none';
-          }
+          var heroSrc = r.hero_image_url || FALLBACK_HERO;
+          els.heroImage.src = heroSrc;
+          els.heroImage.onerror = function () {
+            this.onerror = null;
+            this.src = FALLBACK_HERO;
+          };
+          els.heroImageWrap.style.display = 'block';
 
           renderBadges(r);
           renderHabitats(r.habitats || []);
