@@ -48,7 +48,12 @@ def fetch_columns(conn, schema_name: str, table_name: str) -> set[str]:
 
 def build_taxonomy_name_expr(tax_cols: set[str]) -> str:
     candidates = []
-    for col in ["scientific_name", "full_scientific_name", "canonical_name", "accepted_scientific_name"]:
+    for col in [
+        "scientific_name",
+        "full_scientific_name",
+        "canonical_name",
+        "accepted_scientific_name",
+    ]:
         if col in tax_cols:
             candidates.append(f"NULLIF(t.{col}, '')")
 
@@ -465,7 +470,10 @@ def top_regions(
 
         allowed_sorts = {"species_count", "occurrence_count"}
         if sort_by not in allowed_sorts:
-            raise HTTPException(status_code=400, detail="sort_by must be one of: species_count, occurrence_count")
+            raise HTTPException(
+                status_code=400,
+                detail="sort_by must be one of: species_count, occurrence_count",
+            )
 
         order_clause = (
             "species_count DESC, occurrence_count DESC, region_name"
