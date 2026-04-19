@@ -3,6 +3,7 @@
 import os
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from psycopg.rows import dict_row
 import psycopg
 
@@ -97,6 +98,14 @@ def db_ping():
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Database ping failed: {exc}")
+
+
+@app.get("/atlas.html")
+def serve_atlas_html():
+    atlas_path = os.path.join(os.path.dirname(__file__), "atlas.html")
+    if not os.path.exists(atlas_path):
+        raise HTTPException(status_code=404, detail="atlas.html not found")
+    return FileResponse(atlas_path, media_type="text/html")
 
 
 @app.get("/api/orchid-widgets/featured-gallery")
@@ -376,9 +385,6 @@ def region_intelligence(
     scope: str = Query(..., description="country | continent"),
     value: str = Query(..., description="Brazil | South America"),
 ):
-    """
-    Returns one summary row from oc_intelligence.v_region_species_summary.
-    """
     try:
         normalized_scope = scope.strip().lower()
         if normalized_scope not in {"country", "continent"}:
@@ -436,9 +442,6 @@ def top_regions(
     sort_by: str = Query(default="species_count", description="species_count | occurrence_count"),
     limit: int = Query(default=10, ge=1, le=100),
 ):
-    """
-    Returns ranked region summaries for atlas sidebars, leaderboards, or cards.
-    """
     try:
         normalized_scope = scope.strip().lower()
         if normalized_scope not in {"country", "continent"}:
