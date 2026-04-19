@@ -1,318 +1,708 @@
-<script>
-  const els = {
-    apiBase: document.getElementById('apiBase'),
-    scope: document.getElementById('scope'),
-    regionValue: document.getElementById('regionValue'),
-    loadBtn: document.getElementById('loadBtn'),
-    featuredBtn: document.getElementById('featuredBtn'),
-
-    regionTitle: document.getElementById('regionTitle'),
-    regionSubtitle: document.getElementById('regionSubtitle'),
-    heroImageWrap: document.getElementById('heroImageWrap'),
-    heroImage: document.getElementById('heroImage'),
-    shortDescription: document.getElementById('shortDescription'),
-    badgeRow: document.getElementById('badgeRow'),
-    orchidSignificance: document.getElementById('orchidSignificance'),
-    habitatSummary: document.getElementById('habitatSummary'),
-    climateSummary: document.getElementById('climateSummary'),
-    elevationSummary: document.getElementById('elevationSummary'),
-    conservationSummary: document.getElementById('conservationSummary'),
-
-    statusScope: document.getElementById('statusScope'),
-    statusValue: document.getElementById('statusValue'),
-    statusCount: document.getElementById('statusCount'),
-    statusMode: document.getElementById('statusMode'),
-
-    messageBox: document.getElementById('messageBox'),
-    galleryGrid: document.getElementById('galleryGrid'),
-    habitatGrid: document.getElementById('habitatGrid'),
-  };
-
-  function apiBase() {
-    return els.apiBase.value.replace(/\/+$/, '');
-  }
-
-  function setLoading(isLoading) {
-    document.body.classList.toggle('loading', isLoading);
-    els.loadBtn.disabled = isLoading;
-    els.featuredBtn.disabled = isLoading;
-    els.statusMode.textContent = isLoading ? 'loading' : 'ready';
-  }
-
-  function setMessage(text, type = '') {
-    if (!text) {
-      els.messageBox.innerHTML = '';
-      return;
-    }
-    const cls = type ? `message ${type}` : 'message';
-    els.messageBox.innerHTML = `<div class="${cls}">${text}</div>`;
-  }
-
-  function makeUrl(path, params = {}) {
-    const url = new URL(apiBase() + path);
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
-    });
-    return url.toString();
-  }
-
-  async function fetchJson(path, params = {}) {
-    const response = await fetch(makeUrl(path, params), { cache: 'no-store' });
-    const text = await response.text();
-    let json = null;
-
-    try {
-      json = JSON.parse(text);
-    } catch (_) {
-      throw new Error(text || `HTTP ${response.status}`);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orchid Continuum Atlas</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121a2b;
+      --panel-2: #182235;
+      --text: #e8eefc;
+      --muted: #a9b6d3;
+      --accent: #7bd389;
+      --accent-2: #4ea1ff;
+      --danger: #ff7b7b;
+      --border: #27324a;
+      --card: #101827;
+      --shadow: 0 10px 30px rgba(0,0,0,0.28);
+      --radius: 16px;
     }
 
-    if (!response.ok) {
-      throw new Error(json.detail || `HTTP ${response.status}`);
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #09101c 0%, #0f1728 100%);
+      color: var(--text);
     }
 
-    return json;
-  }
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
 
-  function safeText(value, fallback = '') {
-    return value === null || value === undefined || value === '' ? fallback : String(value);
-  }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
 
-  function safeNumber(value, fallback = '—') {
-    return value === null || value === undefined || value === '' ? fallback : String(value);
-  }
+    .brand h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.1;
+    }
 
-  function renderBadge(label, value) {
-    return `
-      <div class="badge">
-        <div class="badge-label">${label}</div>
-        <div class="badge-value">${safeText(value, '—')}</div>
+    .brand p {
+      margin: 6px 0 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .navlinks {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .navlinks a {
+      text-decoration: none;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: inline-block;
+    }
+
+    .controls {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.9fr 1.2fr auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      outline: none;
+    }
+
+    button {
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--accent-2);
+      color: white;
+      cursor: pointer;
+      font-weight: 700;
+      min-height: 46px;
+    }
+
+    button.secondary {
+      background: #22314b;
+      color: var(--text);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .message {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0f1830;
+      color: var(--text);
+    }
+
+    .message.error {
+      border-color: rgba(255,123,123,0.45);
+      background: rgba(255,123,123,0.10);
+      color: #ffd2d2;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .hero {
+      width: 100%;
+      max-height: 360px;
+      object-fit: cover;
+      display: block;
+      border-bottom: 1px solid var(--border);
+      background: #0a1220;
+    }
+
+    .title-row {
+      margin-bottom: 12px;
+    }
+
+    .title-row h2 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 15px;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 14px 0 18px 0;
+    }
+
+    .badge {
+      background: #16223a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .section {
+      margin-top: 20px;
+    }
+
+    .section h3 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+    }
+
+    .section p {
+      margin: 0;
+      line-height: 1.55;
+      color: #dbe6ff;
+    }
+
+    .habitat-grid,
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .card-image {
+      background: #0b1322;
+      aspect-ratio: 4 / 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-image img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .card-body {
+      padding: 12px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .card-meta {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .status {
+      display: grid;
+      gap: 12px;
+    }
+
+    .status-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+    }
+
+    .status-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+
+    .status-value {
+      font-size: 18px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .empty {
+      background: var(--card);
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      color: var(--muted);
+    }
+
+    .loading-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 1100px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .controls-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .controls-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .title-row h2 {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <h1>Orchid Continuum Atlas</h1>
+        <p>Region profile, orchid gallery, and regional intelligence</p>
       </div>
-    `;
-  }
+      <div class="navlinks">
+        <a href="/index.html">Back to Gallery</a>
+      </div>
+    </div>
 
-  function renderOrchidCards(orchids) {
-    if (!Array.isArray(orchids) || !orchids.length) {
-      return `<div class="empty">No orchids found for this selection.</div>`;
-    }
-
-    return orchids.map(o => `
-      <div class="card">
-        <div class="card-image">
-          ${o.hero_image_url
-            ? `<img src="${o.hero_image_url}" alt="${safeText(o.display_name, 'Orchid')}" />`
-            : `<div class="empty">No image</div>`}
+    <div class="controls">
+      <div class="controls-grid">
+        <div class="field">
+          <label for="apiBase">API Base</label>
+          <input id="apiBase" value="https://orchid-continuum-control-panel.onrender.com" />
         </div>
-        <div class="card-body">
-          <div class="card-title">${safeText(o.display_name, 'Unknown orchid')}</div>
-          ${o.matched_value ? `<div>Matched: ${safeText(o.matched_value)}</div>` : ''}
+
+        <div class="field">
+          <label for="scope">Scope</label>
+          <select id="scope">
+            <option value="country" selected>country</option>
+            <option value="continent">continent</option>
+            <option value="region">region</option>
+            <option value="island">island</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="regionValue">Region Value</label>
+          <input id="regionValue" value="Ecuador" />
+        </div>
+
+        <button id="loadBtn">Load Region</button>
+        <button id="featuredBtn" class="secondary">Load Featured</button>
+      </div>
+
+      <div id="messageBox"></div>
+      <div class="loading-note">This page uses your live Render API routes. It does not replace your backend widgets.</div>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div id="heroImageWrap" style="display:none;">
+          <img id="heroImage" class="hero" alt="Region image" />
+        </div>
+        <div class="panel-body">
+          <div class="title-row">
+            <h2 id="regionTitle">Loading…</h2>
+            <div id="regionSubtitle" class="subtitle"></div>
+          </div>
+
+          <div id="badgeRow" class="badge-row"></div>
+
+          <div class="section">
+            <h3>Overview</h3>
+            <p id="shortDescription"></p>
+          </div>
+
+          <div class="section">
+            <h3>Orchid Significance</h3>
+            <p id="orchidSignificance"></p>
+          </div>
+
+          <div class="section">
+            <h3>Habitats</h3>
+            <p id="habitatSummary"></p>
+          </div>
+
+          <div class="section">
+            <h3>Climate</h3>
+            <p id="climateSummary"></p>
+          </div>
+
+          <div class="section">
+            <h3>Elevation</h3>
+            <p id="elevationSummary"></p>
+          </div>
+
+          <div class="section">
+            <h3>Conservation</h3>
+            <p id="conservationSummary"></p>
+          </div>
+
+          <div class="section">
+            <h3>Habitat Cards</h3>
+            <div id="habitatGrid" class="habitat-grid"></div>
+          </div>
         </div>
       </div>
-    `).join('');
-  }
 
-  function renderSupportCards(profile, summary) {
-    const cards = [];
+      <div class="status">
+        <div class="status-box">
+          <div class="status-label">Scope</div>
+          <div id="statusScope" class="status-value">—</div>
+        </div>
 
-    if (profile?.habitats?.length) {
-      profile.habitats.forEach(h => {
-        cards.push(`
-          <div class="card">
-            <div class="card-image">
-              ${h.image_url
-                ? `<img src="${h.image_url}" alt="${safeText(h.habitat_name, 'Habitat')}" />`
-                : `<div class="empty">No image</div>`}
-            </div>
-            <div class="card-body">
-              <div class="card-title">${safeText(h.habitat_name, 'Habitat')}</div>
-              <div>${safeText(h.habitat_description, '')}</div>
+        <div class="status-box">
+          <div class="status-label">Value</div>
+          <div id="statusValue" class="status-value">—</div>
+        </div>
+
+        <div class="status-box">
+          <div class="status-label">Count</div>
+          <div id="statusCount" class="status-value">0</div>
+        </div>
+
+        <div class="status-box">
+          <div class="status-label">Mode</div>
+          <div id="statusMode" class="status-value">ready</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-body">
+            <div class="section" style="margin-top:0;">
+              <h3>Orchid Gallery</h3>
+              <div id="galleryGrid" class="gallery-grid"></div>
             </div>
           </div>
-        `);
-      });
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const els = {
+      apiBase: document.getElementById('apiBase'),
+      scope: document.getElementById('scope'),
+      regionValue: document.getElementById('regionValue'),
+      loadBtn: document.getElementById('loadBtn'),
+      featuredBtn: document.getElementById('featuredBtn'),
+
+      regionTitle: document.getElementById('regionTitle'),
+      regionSubtitle: document.getElementById('regionSubtitle'),
+      heroImageWrap: document.getElementById('heroImageWrap'),
+      heroImage: document.getElementById('heroImage'),
+      shortDescription: document.getElementById('shortDescription'),
+      badgeRow: document.getElementById('badgeRow'),
+      orchidSignificance: document.getElementById('orchidSignificance'),
+      habitatSummary: document.getElementById('habitatSummary'),
+      climateSummary: document.getElementById('climateSummary'),
+      elevationSummary: document.getElementById('elevationSummary'),
+      conservationSummary: document.getElementById('conservationSummary'),
+
+      statusScope: document.getElementById('statusScope'),
+      statusValue: document.getElementById('statusValue'),
+      statusCount: document.getElementById('statusCount'),
+      statusMode: document.getElementById('statusMode'),
+
+      messageBox: document.getElementById('messageBox'),
+      galleryGrid: document.getElementById('galleryGrid'),
+      habitatGrid: document.getElementById('habitatGrid'),
+    };
+
+    function getApiBase() {
+      return els.apiBase.value.trim().replace(/\/+$/, '');
     }
 
-    if (summary?.top_genera?.length) {
-      summary.top_genera.forEach(g => {
-        cards.push(`
-          <div class="card">
-            <div class="card-body">
-              <div class="card-title">${safeText(g.genus, 'Unknown genus')}</div>
-              <div>Rank: ${safeNumber(g.rank)}</div>
-              <div>Species: ${safeNumber(g.species_count)}</div>
-              <div>Occurrences: ${safeNumber(g.occurrence_count)}</div>
-            </div>
-          </div>
-        `);
-      });
+    function setLoading(isLoading) {
+      document.body.classList.toggle('loading', isLoading);
+      els.loadBtn.disabled = isLoading;
+      els.featuredBtn.disabled = isLoading;
+      els.statusMode.textContent = isLoading ? 'loading' : 'ready';
     }
 
-    if (!cards.length) {
-      return `<div class="empty">No habitat or genus summary available.</div>`;
-    }
-
-    return cards.join('');
-  }
-
-  function setProfileSection(profile) {
-    if (!profile) {
-      els.regionTitle.textContent = els.regionValue.value.trim() || 'Region';
-      els.regionSubtitle.textContent = '';
-      els.shortDescription.textContent = '';
-      els.orchidSignificance.textContent = '';
-      els.habitatSummary.textContent = '';
-      els.climateSummary.textContent = '';
-      els.elevationSummary.textContent = '';
-      els.conservationSummary.textContent = '';
-      els.heroImageWrap.style.display = 'none';
-      return;
-    }
-
-    els.regionTitle.textContent = safeText(profile.region_name, els.regionValue.value.trim() || 'Region');
-    els.regionSubtitle.textContent =
-      safeText(profile.scope, '').toUpperCase() +
-      (profile.continent_name ? ` • ${profile.continent_name}` : '') +
-      (profile.country_name && profile.country_name !== profile.region_name ? ` • ${profile.country_name}` : '');
-
-    els.shortDescription.textContent = safeText(profile.short_description);
-    els.orchidSignificance.textContent = safeText(profile.orchid_significance);
-    els.habitatSummary.textContent = safeText(profile.habitat_summary);
-    els.climateSummary.textContent = safeText(profile.climate_summary);
-    els.elevationSummary.textContent = safeText(profile.elevation_summary);
-    els.conservationSummary.textContent = safeText(profile.conservation_summary);
-
-    if (profile.hero_image_url) {
-      els.heroImage.src = profile.hero_image_url;
-      els.heroImage.alt = safeText(profile.region_name, 'Region image');
-      els.heroImageWrap.style.display = 'block';
-    } else {
-      els.heroImageWrap.style.display = 'none';
-    }
-  }
-
-  function setIntelligenceBadges(summary, scope) {
-    if (!summary) {
-      if (scope === 'country' || scope === 'continent') {
-        els.badgeRow.innerHTML = `<div class="empty">No intelligence summary available.</div>`;
-      } else {
-        els.badgeRow.innerHTML = `<div class="empty">Intelligence summaries are available for country and continent scope.</div>`;
+    function setMessage(text, type = '') {
+      if (!text) {
+        els.messageBox.innerHTML = '';
+        return;
       }
-      return;
+      const cls = type ? `message ${type}` : 'message';
+      els.messageBox.innerHTML = `<div class="${cls}">${text}</div>`;
     }
 
-    els.badgeRow.innerHTML = [
-      renderBadge('Species', safeNumber(summary.species_count)),
-      renderBadge('Occurrences', safeNumber(summary.occurrence_count)),
-      renderBadge('Genera', safeNumber(summary.genus_count)),
-      renderBadge('Taxonomy IDs', safeNumber(summary.taxonomy_count)),
-      renderBadge('Endemic Proxy', safeNumber(summary.endemic_proxy_species_count)),
-      renderBadge('Georeferenced', safeNumber(summary.georeferenced_occurrence_count)),
-      renderBadge('Min Elevation (m)', safeNumber(summary.min_elevation_m)),
-      renderBadge('Max Elevation (m)', safeNumber(summary.max_elevation_m)),
-      renderBadge('Avg Elevation (m)', safeNumber(summary.avg_elevation_m)),
-      renderBadge('Dominant Climate', safeText(summary.dominant_climate_preference, '—')),
-      renderBadge('Dominant Growth Habit', safeText(summary.dominant_growth_habit, '—'))
-    ].join('');
-  }
-
-  async function loadAtlasRegion() {
-    const scope = els.scope.value;
-    const value = els.regionValue.value.trim();
-
-    if (!value) {
-      setMessage('Enter a region value.', 'error');
-      return;
-    }
-
-    els.statusScope.textContent = scope;
-    els.statusValue.textContent = value;
-    els.statusCount.textContent = '…';
-    setLoading(true);
-    setMessage('');
-
-    try {
-      const requests = [
-        fetchJson('/api/orchid-widgets/region-profile', { value }),
-        fetchJson('/api/orchid-widgets/orchids-by-region', { scope, value, limit: 24 })
-      ];
-
-      if (scope === 'country' || scope === 'continent') {
-        requests.push(fetchJson('/api/orchid-widgets/region-intelligence', { scope, value }));
-      } else {
-        requests.push(Promise.resolve(null));
-      }
-
-      const [profileRes, orchidsRes, intelligenceRes] = await Promise.allSettled(requests);
-
-      const profile = profileRes.status === 'fulfilled' ? profileRes.value.region : null;
-      const orchidsData = orchidsRes.status === 'fulfilled' ? orchidsRes.value : null;
-      const summary = intelligenceRes.status === 'fulfilled' && intelligenceRes.value ? intelligenceRes.value.summary : null;
-
-      setProfileSection(profile);
-      setIntelligenceBadges(summary, scope);
-
-      if (orchidsData) {
-        els.statusCount.textContent = safeNumber(orchidsData.count, '0');
-        els.galleryGrid.innerHTML = renderOrchidCards(orchidsData.orchids || []);
-        if (orchidsData.mapping_note) {
-          setMessage(orchidsData.mapping_note, 'info');
+    function makeUrl(path, params = {}) {
+      const url = new URL(getApiBase() + path);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          url.searchParams.set(k, v);
         }
-      } else {
-        els.statusCount.textContent = '0';
-        els.galleryGrid.innerHTML = `<div class="empty">Orchid gallery unavailable.</div>`;
+      });
+      return url.toString();
+    }
+
+    async function fetchJson(path, params = {}) {
+      const response = await fetch(makeUrl(path, params), { cache: 'no-store' });
+      const text = await response.text();
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        throw new Error(text || `HTTP ${response.status}`);
       }
 
-      els.habitatGrid.innerHTML = renderSupportCards(profile, summary);
-
-      if (!profile && !orchidsData && !summary) {
-        throw new Error('No API responses succeeded for this region.');
+      if (!response.ok) {
+        throw new Error(json.detail || `HTTP ${response.status}`);
       }
 
-    } catch (err) {
-      setMessage(err.message, 'error');
-      els.galleryGrid.innerHTML = `<div class="empty">Unable to load region content.</div>`;
-      els.habitatGrid.innerHTML = `<div class="empty">Unable to load supporting content.</div>`;
-      els.badgeRow.innerHTML = `<div class="empty">No summary available.</div>`;
-    } finally {
-      setLoading(false);
+      return json;
     }
-  }
 
-  async function loadFeatured() {
-    setLoading(true);
-    setMessage('');
-
-    try {
-      const data = await fetchJson('/api/orchid-widgets/featured-gallery', { limit: 12 });
-
-      els.galleryGrid.innerHTML = renderOrchidCards(data.cards || []);
-      els.statusCount.textContent = safeNumber(data.count, '0');
-      els.statusScope.textContent = 'featured';
-      els.statusValue.textContent = 'gallery';
-      els.badgeRow.innerHTML = `<div class="empty">Regional intelligence badges appear when loading a country or continent.</div>`;
-      els.habitatGrid.innerHTML = `<div class="empty">Load a region to see habitats and top genera.</div>`;
-
-    } catch (err) {
-      setMessage(err.message, 'error');
-    } finally {
-      setLoading(false);
+    function esc(text) {
+      return String(text ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
     }
-  }
 
-  els.loadBtn.addEventListener('click', loadAtlasRegion);
-  els.featuredBtn.addEventListener('click', loadFeatured);
+    function renderBadges(region) {
+      const badges = [];
+      if (region?.scope) badges.push(`Scope: ${region.scope}`);
+      if (region?.continent_name) badges.push(`Continent: ${region.continent_name}`);
+      if (region?.country_name) badges.push(`Country: ${region.country_name}`);
+      if (region?.parent_region_slug) badges.push(`Parent: ${region.parent_region_slug}`);
+      if (region?.is_featured === true) badges.push('Featured');
 
-  els.regionValue.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') loadAtlasRegion();
-  });
+      els.badgeRow.innerHTML = badges.map(b => `<div class="badge">${esc(b)}</div>`).join('');
+    }
 
-  els.scope.addEventListener('change', () => {
-    const s = els.scope.value;
-    if (s === 'continent') els.regionValue.value = 'South America';
-    if (s === 'island') els.regionValue.value = 'Borneo';
-    if (s === 'country') els.regionValue.value = 'Ecuador';
-    if (s === 'region') els.regionValue.value = 'Southeast Asia';
-  });
+    function renderHabitats(habitats) {
+      if (!habitats || !habitats.length) {
+        els.habitatGrid.innerHTML = `<div class="empty">No habitat cards available yet.</div>`;
+        return;
+      }
 
-  loadAtlasRegion();
-</script>
+      els.habitatGrid.innerHTML = habitats.map(h => `
+        <div class="card">
+          <div class="card-image">
+            ${h.image_url ? `<img src="${esc(h.image_url)}" alt="${esc(h.habitat_name || 'Habitat')}" />` : `<div class="card-meta">No image</div>`}
+          </div>
+          <div class="card-body">
+            <div class="card-title">${esc(h.habitat_name || 'Habitat')}</div>
+            <div class="card-meta">${esc(h.habitat_description || '')}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderGallery(items) {
+      if (!items || !items.length) {
+        els.galleryGrid.innerHTML = `<div class="empty">No orchids found for this selection.</div>`;
+        return;
+      }
+
+      els.galleryGrid.innerHTML = items.map(o => `
+        <div class="card">
+          <div class="card-image">
+            ${o.hero_image_url ? `<img src="${esc(o.hero_image_url)}" alt="${esc(o.display_name || o.scientific_name || 'Orchid')}" />` : `<div class="card-meta">No image</div>`}
+          </div>
+          <div class="card-body">
+            <div class="card-title">${esc(o.display_name || o.scientific_name || 'Unknown orchid')}</div>
+            <div class="card-meta">${esc(o.matched_value || '')}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadAtlasRegion() {
+      const scope = els.scope.value;
+      const value = els.regionValue.value.trim();
+
+      if (!value) {
+        setMessage('Enter a region value.', 'error');
+        return;
+      }
+
+      els.statusScope.textContent = scope;
+      els.statusValue.textContent = value;
+      setLoading(true);
+      setMessage('');
+
+      try {
+        const [profileRes, orchidsRes] = await Promise.allSettled([
+          fetchJson('/api/orchid-widgets/region-profile', { value }),
+          fetchJson('/api/orchid-widgets/orchids-by-region', { scope, value, limit: 24 })
+        ]);
+
+        if (profileRes.status === 'fulfilled') {
+          const r = profileRes.value.region;
+
+          els.regionTitle.textContent = r?.region_name || value;
+          els.regionSubtitle.textContent = r?.continent_name || r?.country_name || '';
+
+          els.shortDescription.textContent = r?.short_description || '';
+          els.orchidSignificance.textContent = r?.orchid_significance || '';
+          els.habitatSummary.textContent = r?.habitat_summary || '';
+          els.climateSummary.textContent = r?.climate_summary || '';
+          els.elevationSummary.textContent = r?.elevation_summary || '';
+          els.conservationSummary.textContent = r?.conservation_summary || '';
+
+          if (r?.hero_image_url) {
+            els.heroImage.src = r.hero_image_url;
+            els.heroImageWrap.style.display = 'block';
+          } else {
+            els.heroImageWrap.style.display = 'none';
+            els.heroImage.removeAttribute('src');
+          }
+
+          renderBadges(r);
+          renderHabitats(r?.habitats || []);
+        } else {
+          els.regionTitle.textContent = value;
+          els.regionSubtitle.textContent = '';
+          els.shortDescription.textContent = '';
+          els.orchidSignificance.textContent = '';
+          els.habitatSummary.textContent = '';
+          els.climateSummary.textContent = '';
+          els.elevationSummary.textContent = '';
+          els.conservationSummary.textContent = '';
+          els.heroImageWrap.style.display = 'none';
+          els.badgeRow.innerHTML = '';
+          renderHabitats([]);
+        }
+
+        if (orchidsRes.status === 'fulfilled') {
+          const data = orchidsRes.value;
+          els.statusCount.textContent = data.count ?? 0;
+          renderGallery(data.orchids || []);
+
+          if (data.mapping_note) {
+            setMessage(data.mapping_note);
+          }
+        } else {
+          els.statusCount.textContent = '0';
+          renderGallery([]);
+          setMessage(or orchidsRes.reason?.message || 'Orchid gallery failed to load.', 'error');
+        }
+
+        if (profileRes.status === 'rejected' && orchidsRes.status === 'rejected') {
+          setMessage(
+            `Profile failed: ${profileRes.reason?.message || 'unknown'} | Gallery failed: ${orchidsRes.reason?.message || 'unknown'}`,
+            'error'
+          );
+        } else if (profileRes.status === 'rejected') {
+          setMessage(`Region profile issue: ${profileRes.reason?.message || 'unknown'}`, 'error');
+        }
+
+      } catch (err) {
+        setMessage(err.message, 'error');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function loadFeatured() {
+      setLoading(true);
+      setMessage('');
+
+      try {
+        const data = await fetchJson('/api/orchid-widgets/featured-gallery', { limit: 12, randomize: true });
+
+        renderGallery(data.cards || []);
+        els.statusCount.textContent = data.count ?? 0;
+        els.statusScope.textContent = 'featured';
+        els.statusValue.textContent = 'random';
+      } catch (err) {
+        setMessage(`Featured gallery issue: ${err.message}`, 'error');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    els.loadBtn.addEventListener('click', loadAtlasRegion);
+    els.featuredBtn.addEventListener('click', loadFeatured);
+
+    els.regionValue.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadAtlasRegion();
+    });
+
+    els.scope.addEventListener('change', () => {
+      const s = els.scope.value;
+      if (s === 'continent') els.regionValue.value = 'South America';
+      if (s === 'island') els.regionValue.value = 'Borneo';
+      if (s === 'country') els.regionValue.value = 'Ecuador';
+      if (s === 'region') els.regionValue.value = 'Southeast Asia';
+    });
+
+    loadAtlasRegion();
+  </script>
+</body>
+</html>
