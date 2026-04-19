@@ -74,6 +74,147 @@
     return json;
   }
 
+  function safeText(value, fallback = '') {
+    return value === null || value === undefined || value === '' ? fallback : String(value);
+  }
+
+  function safeNumber(value, fallback = '—') {
+    return value === null || value === undefined || value === '' ? fallback : String(value);
+  }
+
+  function renderBadge(label, value) {
+    return `
+      <div class="badge">
+        <div class="badge-label">${label}</div>
+        <div class="badge-value">${safeText(value, '—')}</div>
+      </div>
+    `;
+  }
+
+  function renderOrchidCards(orchids) {
+    if (!Array.isArray(orchids) || !orchids.length) {
+      return `<div class="empty">No orchids found for this selection.</div>`;
+    }
+
+    return orchids.map(o => `
+      <div class="card">
+        <div class="card-image">
+          ${o.hero_image_url
+            ? `<img src="${o.hero_image_url}" alt="${safeText(o.display_name, 'Orchid')}" />`
+            : `<div class="empty">No image</div>`}
+        </div>
+        <div class="card-body">
+          <div class="card-title">${safeText(o.display_name, 'Unknown orchid')}</div>
+          ${o.matched_value ? `<div>Matched: ${safeText(o.matched_value)}</div>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderSupportCards(profile, summary) {
+    const cards = [];
+
+    if (profile?.habitats?.length) {
+      profile.habitats.forEach(h => {
+        cards.push(`
+          <div class="card">
+            <div class="card-image">
+              ${h.image_url
+                ? `<img src="${h.image_url}" alt="${safeText(h.habitat_name, 'Habitat')}" />`
+                : `<div class="empty">No image</div>`}
+            </div>
+            <div class="card-body">
+              <div class="card-title">${safeText(h.habitat_name, 'Habitat')}</div>
+              <div>${safeText(h.habitat_description, '')}</div>
+            </div>
+          </div>
+        `);
+      });
+    }
+
+    if (summary?.top_genera?.length) {
+      summary.top_genera.forEach(g => {
+        cards.push(`
+          <div class="card">
+            <div class="card-body">
+              <div class="card-title">${safeText(g.genus, 'Unknown genus')}</div>
+              <div>Rank: ${safeNumber(g.rank)}</div>
+              <div>Species: ${safeNumber(g.species_count)}</div>
+              <div>Occurrences: ${safeNumber(g.occurrence_count)}</div>
+            </div>
+          </div>
+        `);
+      });
+    }
+
+    if (!cards.length) {
+      return `<div class="empty">No habitat or genus summary available.</div>`;
+    }
+
+    return cards.join('');
+  }
+
+  function setProfileSection(profile) {
+    if (!profile) {
+      els.regionTitle.textContent = els.regionValue.value.trim() || 'Region';
+      els.regionSubtitle.textContent = '';
+      els.shortDescription.textContent = '';
+      els.orchidSignificance.textContent = '';
+      els.habitatSummary.textContent = '';
+      els.climateSummary.textContent = '';
+      els.elevationSummary.textContent = '';
+      els.conservationSummary.textContent = '';
+      els.heroImageWrap.style.display = 'none';
+      return;
+    }
+
+    els.regionTitle.textContent = safeText(profile.region_name, els.regionValue.value.trim() || 'Region');
+    els.regionSubtitle.textContent =
+      safeText(profile.scope, '').toUpperCase() +
+      (profile.continent_name ? ` • ${profile.continent_name}` : '') +
+      (profile.country_name && profile.country_name !== profile.region_name ? ` • ${profile.country_name}` : '');
+
+    els.shortDescription.textContent = safeText(profile.short_description);
+    els.orchidSignificance.textContent = safeText(profile.orchid_significance);
+    els.habitatSummary.textContent = safeText(profile.habitat_summary);
+    els.climateSummary.textContent = safeText(profile.climate_summary);
+    els.elevationSummary.textContent = safeText(profile.elevation_summary);
+    els.conservationSummary.textContent = safeText(profile.conservation_summary);
+
+    if (profile.hero_image_url) {
+      els.heroImage.src = profile.hero_image_url;
+      els.heroImage.alt = safeText(profile.region_name, 'Region image');
+      els.heroImageWrap.style.display = 'block';
+    } else {
+      els.heroImageWrap.style.display = 'none';
+    }
+  }
+
+  function setIntelligenceBadges(summary, scope) {
+    if (!summary) {
+      if (scope === 'country' || scope === 'continent') {
+        els.badgeRow.innerHTML = `<div class="empty">No intelligence summary available.</div>`;
+      } else {
+        els.badgeRow.innerHTML = `<div class="empty">Intelligence summaries are available for country and continent scope.</div>`;
+      }
+      return;
+    }
+
+    els.badgeRow.innerHTML = [
+      renderBadge('Species', safeNumber(summary.species_count)),
+      renderBadge('Occurrences', safeNumber(summary.occurrence_count)),
+      renderBadge('Genera', safeNumber(summary.genus_count)),
+      renderBadge('Taxonomy IDs', safeNumber(summary.taxonomy_count)),
+      renderBadge('Endemic Proxy', safeNumber(summary.endemic_proxy_species_count)),
+      renderBadge('Georeferenced', safeNumber(summary.georeferenced_occurrence_count)),
+      renderBadge('Min Elevation (m)', safeNumber(summary.min_elevation_m)),
+      renderBadge('Max Elevation (m)', safeNumber(summary.max_elevation_m)),
+      renderBadge('Avg Elevation (m)', safeNumber(summary.avg_elevation_m)),
+      renderBadge('Dominant Climate', safeText(summary.dominant_climate_preference, '—')),
+      renderBadge('Dominant Growth Habit', safeText(summary.dominant_growth_habit, '—'))
+    ].join('');
+  }
+
   async function loadAtlasRegion() {
     const scope = els.scope.value;
     const value = els.regionValue.value.trim();
@@ -85,62 +226,53 @@
 
     els.statusScope.textContent = scope;
     els.statusValue.textContent = value;
+    els.statusCount.textContent = '…';
     setLoading(true);
     setMessage('');
 
     try {
-      const [profileRes, orchidsRes] = await Promise.allSettled([
+      const requests = [
         fetchJson('/api/orchid-widgets/region-profile', { value }),
         fetchJson('/api/orchid-widgets/orchids-by-region', { scope, value, limit: 24 })
-      ]);
+      ];
 
-      if (profileRes.status === 'fulfilled') {
-        const r = profileRes.value.region;
-
-        els.regionTitle.textContent = r?.region_name || value;
-        els.regionSubtitle.textContent = r?.continent_name || '';
-
-        els.shortDescription.textContent = r?.short_description || '';
-        els.orchidSignificance.textContent = r?.orchid_significance || '';
-        els.habitatSummary.textContent = r?.habitat_summary || '';
-        els.climateSummary.textContent = r?.climate_summary || '';
-        els.elevationSummary.textContent = r?.elevation_summary || '';
-        els.conservationSummary.textContent = r?.conservation_summary || '';
-
-        if (r?.hero_image_url) {
-          els.heroImage.src = r.hero_image_url;
-          els.heroImageWrap.style.display = 'block';
-        } else {
-          els.heroImageWrap.style.display = 'none';
-        }
+      if (scope === 'country' || scope === 'continent') {
+        requests.push(fetchJson('/api/orchid-widgets/region-intelligence', { scope, value }));
+      } else {
+        requests.push(Promise.resolve(null));
       }
 
-      if (orchidsRes.status === 'fulfilled') {
-        const data = orchidsRes.value;
-        els.statusCount.textContent = data.count;
+      const [profileRes, orchidsRes, intelligenceRes] = await Promise.allSettled(requests);
 
-        if (!data.orchids.length) {
-          els.galleryGrid.innerHTML = `
-            <div class="empty">
-              No orchids found for this region.
-            </div>
-          `;
-        } else {
-          els.galleryGrid.innerHTML = data.orchids.map(o => `
-            <div class="card">
-              <div class="card-image">
-                <img src="${o.hero_image_url}" />
-              </div>
-              <div class="card-body">
-                <div class="card-title">${o.display_name}</div>
-              </div>
-            </div>
-          `).join('');
+      const profile = profileRes.status === 'fulfilled' ? profileRes.value.region : null;
+      const orchidsData = orchidsRes.status === 'fulfilled' ? orchidsRes.value : null;
+      const summary = intelligenceRes.status === 'fulfilled' && intelligenceRes.value ? intelligenceRes.value.summary : null;
+
+      setProfileSection(profile);
+      setIntelligenceBadges(summary, scope);
+
+      if (orchidsData) {
+        els.statusCount.textContent = safeNumber(orchidsData.count, '0');
+        els.galleryGrid.innerHTML = renderOrchidCards(orchidsData.orchids || []);
+        if (orchidsData.mapping_note) {
+          setMessage(orchidsData.mapping_note, 'info');
         }
+      } else {
+        els.statusCount.textContent = '0';
+        els.galleryGrid.innerHTML = `<div class="empty">Orchid gallery unavailable.</div>`;
+      }
+
+      els.habitatGrid.innerHTML = renderSupportCards(profile, summary);
+
+      if (!profile && !orchidsData && !summary) {
+        throw new Error('No API responses succeeded for this region.');
       }
 
     } catch (err) {
       setMessage(err.message, 'error');
+      els.galleryGrid.innerHTML = `<div class="empty">Unable to load region content.</div>`;
+      els.habitatGrid.innerHTML = `<div class="empty">Unable to load supporting content.</div>`;
+      els.badgeRow.innerHTML = `<div class="empty">No summary available.</div>`;
     } finally {
       setLoading(false);
     }
@@ -153,20 +285,12 @@
     try {
       const data = await fetchJson('/api/orchid-widgets/featured-gallery', { limit: 12 });
 
-      els.galleryGrid.innerHTML = data.cards.map(c => `
-        <div class="card">
-          <div class="card-image">
-            <img src="${c.hero_image_url}" />
-          </div>
-          <div class="card-body">
-            <div class="card-title">${c.display_name}</div>
-          </div>
-        </div>
-      `).join('');
-
-      els.statusCount.textContent = data.count;
+      els.galleryGrid.innerHTML = renderOrchidCards(data.cards || []);
+      els.statusCount.textContent = safeNumber(data.count, '0');
       els.statusScope.textContent = 'featured';
-      els.statusValue.textContent = 'random';
+      els.statusValue.textContent = 'gallery';
+      els.badgeRow.innerHTML = `<div class="empty">Regional intelligence badges appear when loading a country or continent.</div>`;
+      els.habitatGrid.innerHTML = `<div class="empty">Load a region to see habitats and top genera.</div>`;
 
     } catch (err) {
       setMessage(err.message, 'error');
@@ -175,7 +299,6 @@
     }
   }
 
-  // EVENTS
   els.loadBtn.addEventListener('click', loadAtlasRegion);
   els.featuredBtn.addEventListener('click', loadFeatured);
 
@@ -185,12 +308,11 @@
 
   els.scope.addEventListener('change', () => {
     const s = els.scope.value;
-
     if (s === 'continent') els.regionValue.value = 'South America';
     if (s === 'island') els.regionValue.value = 'Borneo';
     if (s === 'country') els.regionValue.value = 'Ecuador';
+    if (s === 'region') els.regionValue.value = 'Southeast Asia';
   });
 
-  // INITIAL LOAD
   loadAtlasRegion();
 </script>
