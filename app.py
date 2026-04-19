@@ -7,7 +7,7 @@ from psycopg.rows import dict_row
 import psycopg
 
 APP_TITLE = "Orchid Continuum API"
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
@@ -250,14 +250,14 @@ def orchids_by_region(
             )
 
         with get_conn() as conn:
-            tax_cols = fetch_columns(conn, "public", "orchid_taxonomy")
             occ_cols = fetch_columns(conn, "public", "orchid_occurrence")
-            name_expr = build_taxonomy_name_expr(tax_cols)
 
             required_occ = {"taxonomy_id", "country", "region", "scientific_name"}
             missing = sorted(required_occ - occ_cols)
             if missing:
-                raise RuntimeError(f"public.orchid_occurrence is missing required columns: {', '.join(missing)}")
+                raise RuntimeError(
+                    f"public.orchid_occurrence is missing required columns: {', '.join(missing)}"
+                )
 
             if normalized_scope == "country":
                 sql = """
@@ -369,3 +369,126 @@ def orchids_by_region(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Orchids by region failed: {exc}")
+
+
+@app.get("/api/orchid-widgets/region-intelligence")
+def region_intelligence(
+    scope: str = Query(..., description="country | continent"),
+    value: str = Query(..., description="Brazil | South America"),
+):
+    """
+    Returns one summary row from oc_intelligence.v_region_species_summary.
+    """
+    try:
+        normalized_scope = scope.strip().lower()
+        if normalized_scope not in {"country", "continent"}:
+            raise HTTPException(status_code=400, detail="scope must be one of: country, continent")
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        region_scope,
+                        region_name,
+                        parent_region_name,
+                        occurrence_count,
+                        species_count,
+                        taxonomy_count,
+                        genus_count,
+                        endemic_proxy_species_count,
+                        min_elevation_m,
+                        max_elevation_m,
+                        avg_elevation_m,
+                        georeferenced_occurrence_count,
+                        dominant_climate_preference,
+                        dominant_growth_habit,
+                        top_genera,
+                        created_at
+                    FROM oc_intelligence.v_region_species_summary
+                    WHERE lower(region_scope) = lower(%s)
+                      AND lower(region_name) = lower(%s)
+                    LIMIT 1
+                    """,
+                    (normalized_scope, value),
+                )
+                row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Region intelligence not found")
+
+        return {
+            "widget": "region_intelligence",
+            "scope": normalized_scope,
+            "value": value,
+            "summary": row,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Region intelligence failed: {exc}")
+
+
+@app.get("/api/orchid-widgets/top-regions")
+def top_regions(
+    scope: str = Query(..., description="country | continent"),
+    sort_by: str = Query(default="species_count", description="species_count | occurrence_count"),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    """
+    Returns ranked region summaries for atlas sidebars, leaderboards, or cards.
+    """
+    try:
+        normalized_scope = scope.strip().lower()
+        if normalized_scope not in {"country", "continent"}:
+            raise HTTPException(status_code=400, detail="scope must be one of: country, continent")
+
+        allowed_sorts = {"species_count", "occurrence_count"}
+        if sort_by not in allowed_sorts:
+            raise HTTPException(status_code=400, detail="sort_by must be one of: species_count, occurrence_count")
+
+        order_clause = "species_count DESC, occurrence_count DESC, region_name" if sort_by == "species_count" \
+            else "occurrence_count DESC, species_count DESC, region_name"
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT
+                        region_scope,
+                        region_name,
+                        occurrence_count,
+                        species_count,
+                        taxonomy_count,
+                        genus_count,
+                        endemic_proxy_species_count,
+                        min_elevation_m,
+                        max_elevation_m,
+                        avg_elevation_m,
+                        georeferenced_occurrence_count,
+                        dominant_climate_preference,
+                        dominant_growth_habit,
+                        top_genera,
+                        created_at
+                    FROM oc_intelligence.v_region_species_summary
+                    WHERE lower(region_scope) = lower(%s)
+                    ORDER BY {order_clause}
+                    LIMIT %s
+                    """,
+                    (normalized_scope, limit),
+                )
+                rows = cur.fetchall()
+
+        return {
+            "widget": "top_regions",
+            "scope": normalized_scope,
+            "sort_by": sort_by,
+            "count": len(rows),
+            "rows": rows,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Top regions failed: {exc}")
