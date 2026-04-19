@@ -370,7 +370,7 @@
         </div>
         <div class="panel-body">
           <div class="title-row">
-            <h2 id="regionTitle">Loading…</h2>
+            <h2 id="regionTitle">Loading...</h2>
             <div id="regionSubtitle" class="subtitle"></div>
           </div>
 
@@ -481,7 +481,6 @@
     }
 
     function setLoading(isLoading) {
-      document.body.classList.toggle('loading', isLoading);
       els.loadBtn.disabled = isLoading;
       els.featuredBtn.disabled = isLoading;
       els.statusMode.textContent = isLoading ? 'loading' : 'ready';
@@ -650,7 +649,7 @@
         } else {
           els.statusCount.textContent = '0';
           renderGallery([]);
-          setMessage(or orchidsRes.reason?.message || 'Orchid gallery failed to load.', 'error');
+          setMessage(orchidsRes.reason?.message || 'Orchid gallery failed to load.', 'error');
         }
 
         if (profileRes.status === 'rejected' && orchidsRes.status === 'rejected') {
@@ -706,3 +705,4 @@
   </script>
 </body>
 </html>
+ I put in exactly that full HTML into Atlas.html not Atlas.bot or Atlas base or Atlas.js or anything. I can't imagine there's an error in it since I copy pasted it from your text. But I noticed those JSON things all worked now because I typed them directly into the browser. Why doesn't this screen update? It's making me nuts. I don't know what I'm supposed to do. Force reload maybe? Are you sure that you gave me the right script? T 
