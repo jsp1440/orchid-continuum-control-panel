@@ -29,10 +29,62 @@ def get_fallback_image():
     return "https://upload.wikimedia.org/wikipedia/commons/9/9d/Orchidaceae_-_flower.jpg"
 
 # -------------------------
+# IMAGE POOL HELPER
+# -------------------------
+def get_image_pool(n: int = 10) -> list:
+    """Pull up to n real image URLs from orchid_images. Returns list of URLs."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT image_url
+                    FROM orchid_images
+                    WHERE image_url IS NOT NULL AND image_url != ''
+                    ORDER BY RANDOM()
+                    LIMIT %s
+                """, (n,))
+                rows = cur.fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+def pick_image(pool: list, used: set) -> str:
+    """Pick an unused image from pool, or fallback if exhausted."""
+    for url in pool:
+        if url not in used:
+            used.add(url)
+            return url
+    return get_fallback_image()
+
+# -------------------------
 # REGION PROFILE
 # -------------------------
 @app.get("/api/orchid-widgets/region-profile")
 def region_profile(value: str):
+
+    # Pull a small pool of real images from DB
+    pool = get_image_pool(10)
+    used = set()
+
+    hero_image_url = pick_image(pool, used) if pool else get_fallback_image()
+
+    habitats = [
+        {
+            "habitat_name": "Andean Cloud Forest",
+            "habitat_description": "Humid montane forest with high orchid diversity.",
+            "image_url": pick_image(pool, used) if pool else get_fallback_image()
+        },
+        {
+            "habitat_name": "Upper Amazonian Lowland Rainforest",
+            "habitat_description": "Warm wet rainforest with canopy epiphytes.",
+            "image_url": pick_image(pool, used) if pool else get_fallback_image()
+        },
+        {
+            "habitat_name": "Chocó Wet Forest",
+            "habitat_description": "Extremely wet biodiversity hotspot on the Pacific slope.",
+            "image_url": pick_image(pool, used) if pool else get_fallback_image()
+        }
+    ]
 
     return {
         "region": {
@@ -44,24 +96,8 @@ def region_profile(value: str):
             "climate_summary": "Tropical to montane climates.",
             "elevation_summary": "Sea level to high Andes.",
             "conservation_summary": "Deforestation and climate threats.",
-            "hero_image_url": get_fallback_image(),
-            "habitats": [
-                {
-                    "habitat_name": "Andean Cloud Forest",
-                    "habitat_description": "Humid montane forest with high diversity.",
-                    "image_url": get_fallback_image()
-                },
-                {
-                    "habitat_name": "Upper Amazonian Lowland Rainforest",
-                    "habitat_description": "Warm wet rainforest.",
-                    "image_url": get_fallback_image()
-                },
-                {
-                    "habitat_name": "Chocó Wet Forest",
-                    "habitat_description": "Extremely wet biodiversity hotspot.",
-                    "image_url": get_fallback_image()
-                }
-            ]
+            "hero_image_url": hero_image_url,
+            "habitats": habitats
         }
     }
 
