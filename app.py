@@ -86,40 +86,41 @@ def find_atlas_html() -> Path:
 def image_score_sql(url_expr: str) -> str:
     """
     Lower score = better image for public-facing atlas cards.
-    0 = likely live plant photo
-    1 = acceptable generic image
-    9 = likely herbarium/specimen/scan
+
+    psycopg uses percent-format placeholders. Literal SQL LIKE wildcards in a query
+    string must therefore be escaped as %% so psycopg does not interpret them as
+    placeholders such as %i.
     """
     u = f"lower(coalesce({url_expr}, ''))"
     return f"""
     CASE
         WHEN {u} = '' THEN 99
 
-        WHEN {u} LIKE '%inaturalist%' THEN 0
-        WHEN {u} LIKE '%static.inaturalist.org%' THEN 0
-        WHEN {u} LIKE '%plantnet%' THEN 0
-        WHEN {u} LIKE '%flickr%' THEN 0
-        WHEN {u} LIKE '%commons.wikimedia%' THEN 0
-        WHEN {u} LIKE '%upload.wikimedia%' THEN 0
-        WHEN {u} LIKE '%orchidspecies%' THEN 0
-        WHEN {u} LIKE '%instagram%' THEN 0
+        WHEN {u} LIKE '%%inaturalist%%' THEN 0
+        WHEN {u} LIKE '%%static.inaturalist.org%%' THEN 0
+        WHEN {u} LIKE '%%plantnet%%' THEN 0
+        WHEN {u} LIKE '%%flickr%%' THEN 0
+        WHEN {u} LIKE '%%commons.wikimedia%%' THEN 0
+        WHEN {u} LIKE '%%upload.wikimedia%%' THEN 0
+        WHEN {u} LIKE '%%orchidspecies%%' THEN 0
+        WHEN {u} LIKE '%%instagram%%' THEN 0
 
-        WHEN {u} LIKE '%herbarium%' THEN 9
-        WHEN {u} LIKE '%specimen%' THEN 9
-        WHEN {u} LIKE '%type%' THEN 9
-        WHEN {u} LIKE '%huh.harvard.edu%' THEN 9
-        WHEN {u} LIKE '%data.huh.harvard.edu%' THEN 9
-        WHEN {u} LIKE '%sernec%' THEN 9
-        WHEN {u} LIKE '%jstor%' THEN 9
-        WHEN {u} LIKE '%museum%' THEN 9
-        WHEN {u} LIKE '%collection%' THEN 9
-        WHEN {u} LIKE '%collections%' THEN 9
-        WHEN {u} LIKE '%mnhn%' THEN 9
-        WHEN {u} LIKE '%tropicos%' THEN 9
-        WHEN {u} LIKE '%mobot.org%' THEN 9
-        WHEN {u} LIKE '%preserved%' THEN 9
-        WHEN {u} LIKE '%scan%' THEN 9
-        WHEN {u} LIKE '%sheet%' THEN 9
+        WHEN {u} LIKE '%%herbarium%%' THEN 9
+        WHEN {u} LIKE '%%specimen%%' THEN 9
+        WHEN {u} LIKE '%%type%%' THEN 9
+        WHEN {u} LIKE '%%huh.harvard.edu%%' THEN 9
+        WHEN {u} LIKE '%%data.huh.harvard.edu%%' THEN 9
+        WHEN {u} LIKE '%%sernec%%' THEN 9
+        WHEN {u} LIKE '%%jstor%%' THEN 9
+        WHEN {u} LIKE '%%museum%%' THEN 9
+        WHEN {u} LIKE '%%collection%%' THEN 9
+        WHEN {u} LIKE '%%collections%%' THEN 9
+        WHEN {u} LIKE '%%mnhn%%' THEN 9
+        WHEN {u} LIKE '%%tropicos%%' THEN 9
+        WHEN {u} LIKE '%%mobot.org%%' THEN 9
+        WHEN {u} LIKE '%%preserved%%' THEN 9
+        WHEN {u} LIKE '%%scan%%' THEN 9
+        WHEN {u} LIKE '%%sheet%%' THEN 9
         ELSE 1
     END
     """
