@@ -1,5 +1,5 @@
 # FILE: app.py
-# AFFECTS: adds Brain/database status wrappers and makes Atlas use harvested iNat images as fallback/live data
+# AFFECTS: fixes Atlas regional image filtering so state/region pages do not fall back to unrelated global orchids
 # WILL NOT BREAK: /health, /db/ping, /atlas.html, existing orchid widget endpoints
 
 #!/usr/bin/env python3
@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from psycopg.rows import dict_row
 
 APP_TITLE = "Orchid Continuum API"
-APP_VERSION = "1.9"
+APP_VERSION = "1.10"
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 app.add_middleware(
@@ -102,8 +102,70 @@ def image_score_sql(url_expr: str) -> str:
     """
 
 
-def best_harvested_image_for_region(conn, value: str | None) -> str | None:
+def column_expr(cols: set[str], preferred: list[str]) -> str:
+    existing = [c for c in preferred if c in cols]
+    if not existing:
+        return "''"
+    return "COALESCE(" + ", ".join([f"NULLIF({c}, '')" for c in existing]) + ", '')"
+
+
+def build_region_filter(cols: set[str], scope: str, value: str) -> tuple[str, list[Any], str]:
+    """Return SQL WHERE fragment, params, and strategy.
+
+    Important: region-specific calls must never fall back to random global orchids.
+    If a user accidentally leaves scope='country' while typing a state such as California,
+    this first tries country and then safely tries region/state/locality columns.
+    """
+    normalized_scope = (scope or "").strip().lower()
+    value = (value or "").strip()
+    if not value:
+        return "FALSE", [], "empty_value"
+
+    country_cols = [c for c in ["country", "country_name"] if c in cols]
+    continent_cols = [c for c in ["continent", "continent_name"] if c in cols]
+    region_cols = [c for c in [
+        "region", "region_name", "state", "state_name", "state_province", "province",
+        "county", "locality", "location", "place", "verbatim_locality"
+    ] if c in cols]
+    island_cols = [c for c in ["island", "island_name", "locality", "location", "place", "verbatim_locality"] if c in cols]
+
+    def exact_or_contains(columns: list[str]) -> tuple[str, list[Any]]:
+        pieces: list[str] = []
+        params: list[Any] = []
+        for col in columns:
+            pieces.append(f"lower(coalesce({col}, '')) = lower(%s)")
+            params.append(value)
+            pieces.append(f"lower(coalesce({col}, '')) LIKE lower(%s)")
+            params.append(f"%{value}%")
+        return " OR ".join(pieces), params
+
+    candidate_cols: list[str] = []
+    strategy = normalized_scope
+    if normalized_scope == "country":
+        candidate_cols = country_cols + region_cols
+        strategy = "country_then_region_fields_no_random_fallback"
+    elif normalized_scope == "continent":
+        candidate_cols = continent_cols
+        strategy = "continent_fields_no_random_fallback"
+    elif normalized_scope == "island":
+        candidate_cols = island_cols
+        strategy = "island_fields_no_random_fallback"
+    else:
+        candidate_cols = region_cols + country_cols
+        strategy = "region_fields_no_random_fallback"
+
+    if not candidate_cols:
+        return "FALSE", [], "no_matching_columns"
+    sql, params = exact_or_contains(candidate_cols)
+    return f"({sql})", params, strategy
+
+
+def best_harvested_image_for_region(conn, value: str | None, scope: str = "region") -> str | None:
     if not value or not table_exists(conn, "public", "images"):
+        return None
+    cols = fetch_columns(conn, "public", "images")
+    filter_sql, params, _strategy = build_region_filter(cols, scope, value)
+    if filter_sql == "FALSE":
         return None
     with conn.cursor() as cur:
         cur.execute(
@@ -111,34 +173,48 @@ def best_harvested_image_for_region(conn, value: str | None) -> str | None:
             SELECT url
             FROM public.images
             WHERE url IS NOT NULL
-              AND (
-                  lower(coalesce(country, '')) LIKE lower(%s)
-                  OR lower(coalesce(scientific_name, '')) LIKE lower(%s)
-              )
+              AND {filter_sql}
             ORDER BY {image_score_sql('url')}, random()
             LIMIT 1
             """,
-            (f"%{value}%", f"%{value}%"),
+            tuple(params),
         )
         row = cur.fetchone()
         return row["url"] if row else None
 
 
-def harvested_cards(conn, limit: int, value: str | None = None, randomize: bool = False) -> list[dict[str, Any]]:
+def harvested_cards(conn, limit: int, value: str | None = None, scope: str = "country", randomize: bool = False) -> tuple[list[dict[str, Any]], str]:
     if not table_exists(conn, "public", "images"):
-        return []
+        return [], "missing_images_table"
+
+    cols = fetch_columns(conn, "public", "images")
     where = "url IS NOT NULL AND scientific_name IS NOT NULL"
     params: list[Any] = []
+    strategy = "global_gallery"
+
     if value:
-        where += " AND lower(coalesce(country, '')) LIKE lower(%s)"
-        params.append(f"%{value}%")
+        filter_sql, filter_params, strategy = build_region_filter(cols, scope, value)
+        where += f" AND {filter_sql}"
+        params.extend(filter_params)
+
     order_clause = "random()" if randomize else "scientific_name, id"
+    matched_expr = column_expr(cols, [
+        "country", "country_name", "state_province", "state", "province", "region", "region_name",
+        "county", "locality", "location", "island", "continent"
+    ])
+    source_expr = "source" if "source" in cols else "'public.images'"
+    id_expr = "id" if "id" in cols else "row_number() OVER ()"
+
     params.append(limit)
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT id, scientific_name, COALESCE(NULLIF(scientific_name, ''), 'Unknown orchid') AS display_name,
-                   url AS hero_image_url, country AS matched_value, source
+            SELECT {id_expr} AS id,
+                   scientific_name,
+                   COALESCE(NULLIF(scientific_name, ''), 'Unknown orchid') AS display_name,
+                   url AS hero_image_url,
+                   {matched_expr} AS matched_value,
+                   {source_expr} AS source
             FROM public.images
             WHERE {where}
             ORDER BY {order_clause}
@@ -146,7 +222,7 @@ def harvested_cards(conn, limit: int, value: str | None = None, randomize: bool 
             """,
             tuple(params),
         )
-        return [dict(r) for r in cur.fetchall()]
+        return [dict(r) for r in cur.fetchall()], strategy
 
 
 @app.get("/")
@@ -214,21 +290,21 @@ def serve_atlas_html():
 
 @app.get("/api/orchid-widgets/region")
 def region_legacy(scope: str = Query(...), value: str = Query(...)):
-    return region_profile(value=value)
+    return region_profile(value=value, scope=scope)
 
 
 @app.get("/api/orchid-widgets/featured-gallery")
-def featured_gallery(limit: int = Query(default=12, ge=1, le=48), randomize: bool = Query(default=False)):
+def featured_gallery(limit: int = Query(default=12, ge=1, le=200), randomize: bool = Query(default=False)):
     try:
         with get_conn() as conn:
-            cards = harvested_cards(conn, limit=limit, randomize=randomize)
-        return {"widget": "featured_gallery", "source": "public.images", "count": len(cards), "cards": cards}
+            cards, strategy = harvested_cards(conn, limit=limit, randomize=randomize)
+        return {"widget": "featured_gallery", "source": "public.images", "count": len(cards), "match_strategy": strategy, "cards": cards}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Featured gallery failed: {exc}")
 
 
 @app.get("/api/orchid-widgets/region-profile")
-def region_profile(value: str = Query(..., description="region slug, alias, or region name")):
+def region_profile(value: str = Query(..., description="region slug, alias, or region name"), scope: str = Query(default="region")):
     try:
         with get_conn() as conn:
             region = None
@@ -259,7 +335,7 @@ def region_profile(value: str = Query(..., description="region slug, alias, or r
                             cur.execute("SELECT media_type, media_url, caption, credit, sort_order FROM oc_regions.region_media WHERE region_slug=%s ORDER BY sort_order", (region["region_slug"],))
                             media = cur.fetchall()
 
-            fallback_image = best_harvested_image_for_region(conn, value)
+            fallback_image = best_harvested_image_for_region(conn, value, scope=scope)
 
         if region:
             r = dict(region)
@@ -267,9 +343,9 @@ def region_profile(value: str = Query(..., description="region slug, alias, or r
             r = {
                 "region_slug": value.strip().lower().replace(" ", "-"),
                 "region_name": value,
-                "scope": "region",
-                "country_name": value,
-                "continent_name": None,
+                "scope": scope,
+                "country_name": value if scope == "country" else None,
+                "continent_name": value if scope == "continent" else None,
                 "short_description": f"Live Orchid Continuum region profile for {value} using harvested orchid records.",
                 "orchid_significance": "This profile is backed by the active Orchid Continuum harvester and will improve as the Brain fills in taxonomy, geography, images, and literature.",
                 "habitat_summary": "Habitat summaries are being assembled from curated regional records and harvested observations.",
@@ -296,20 +372,18 @@ def orchids_by_region(scope: str = Query(...), value: str = Query(...), limit: i
         if normalized_scope not in {"country", "region", "island", "continent"}:
             raise HTTPException(status_code=400, detail="scope must be one of: country, region, island, continent")
         with get_conn() as conn:
-            orchids = harvested_cards(conn, limit=limit, value=value, randomize=False)
-            if not orchids:
-                orchids = harvested_cards(conn, limit=limit, randomize=True)
+            orchids, strategy = harvested_cards(conn, limit=limit, value=value, scope=normalized_scope, randomize=False)
         response = {
             "widget": "orchids_by_region",
             "scope": normalized_scope,
             "value": value,
             "source": "public.images",
             "count": len(orchids),
-            "match_strategy": "harvested_images_country_contains_with_random_fallback",
+            "match_strategy": strategy,
             "orchids": orchids,
         }
         if not orchids:
-            response["mapping_note"] = "No harvested orchid images are available yet."
+            response["mapping_note"] = f"No harvested orchid images matched {normalized_scope}={value}. No unrelated global fallback was used."
         return response
     except HTTPException:
         raise
@@ -339,16 +413,19 @@ def region_intelligence(scope: str = Query(...), value: str = Query(...)):
                     )
                     row = cur.fetchone()
             if not row and table_exists(conn, "public", "images"):
+                cols = fetch_columns(conn, "public", "images")
+                filter_sql, params, _strategy = build_region_filter(cols, normalized_scope, value)
+                genus_expr = "genus" if "genus" in cols else "split_part(scientific_name, ' ', 1)"
                 with conn.cursor() as cur:
                     cur.execute(
-                        """
+                        f"""
                         SELECT COUNT(*)::int AS occurrence_count,
                                COUNT(DISTINCT scientific_name)::int AS species_count,
-                               COUNT(DISTINCT genus)::int AS genus_count
+                               COUNT(DISTINCT {genus_expr})::int AS genus_count
                         FROM public.images
-                        WHERE lower(coalesce(country, '')) LIKE lower(%s)
+                        WHERE scientific_name IS NOT NULL AND {filter_sql}
                         """,
-                        (f"%{value}%",),
+                        tuple(params),
                     )
                     counts = cur.fetchone()
                 row = {
@@ -386,9 +463,19 @@ def top_regions(scope: str = Query(...), sort_by: str = Query(default="species_c
                     cur.execute(f"SELECT * FROM oc_intelligence.v_region_species_summary WHERE lower(region_scope)=lower(%s) ORDER BY {order_clause} LIMIT %s", (normalized_scope, limit))
                     rows = [dict(r) for r in cur.fetchall()]
             elif table_exists(conn, "public", "images"):
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 'country' AS region_scope, country AS region_name, COUNT(*)::int AS occurrence_count, COUNT(DISTINCT scientific_name)::int AS species_count FROM public.images WHERE country IS NOT NULL GROUP BY country ORDER BY species_count DESC, occurrence_count DESC LIMIT %s", (limit,))
-                    rows = [dict(r) for r in cur.fetchall()]
+                cols = fetch_columns(conn, "public", "images")
+                if normalized_scope == "continent" and "continent" in cols:
+                    group_col = "continent"
+                elif normalized_scope == "region" and "state_province" in cols:
+                    group_col = "state_province"
+                elif normalized_scope == "region" and "region" in cols:
+                    group_col = "region"
+                else:
+                    group_col = "country" if "country" in cols else None
+                if group_col:
+                    with conn.cursor() as cur:
+                        cur.execute(f"SELECT %s AS region_scope, {group_col} AS region_name, COUNT(*)::int AS occurrence_count, COUNT(DISTINCT scientific_name)::int AS species_count FROM public.images WHERE {group_col} IS NOT NULL AND {group_col} <> '' GROUP BY {group_col} ORDER BY species_count DESC, occurrence_count DESC LIMIT %s", (normalized_scope, limit))
+                        rows = [dict(r) for r in cur.fetchall()]
         return {"widget": "top_regions", "scope": normalized_scope, "sort_by": sort_by, "count": len(rows), "rows": rows}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Top regions failed: {exc}")
