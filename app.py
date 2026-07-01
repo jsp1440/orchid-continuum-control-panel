@@ -19,6 +19,7 @@ from admin import router as admin_router
 from agents import router as agents_router
 from calyx import router as calyx_router
 from memory import router as memory_router
+from observation import router as observation_router
 
 APP_TITLE = "Orchid Continuum API"
 APP_VERSION = "1.11"
@@ -35,6 +36,7 @@ app.include_router(memory_router)
 app.include_router(admin_router)
 app.include_router(agents_router)
 app.include_router(calyx_router)
+app.include_router(observation_router)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -483,6 +485,14 @@ def serve_calyx_html():
     path = Path(__file__).resolve().parent / "calyx.html"
     if not path.exists():
         raise HTTPException(status_code=404, detail="calyx.html not found")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.get("/observations.html", dependencies=[Depends(require_admin_token)])
+def serve_observations_html():
+    path = Path(__file__).resolve().parent / "observations.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="observations.html not found")
     return FileResponse(path, media_type="text/html")
 
 

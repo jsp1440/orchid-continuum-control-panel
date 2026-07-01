@@ -82,6 +82,12 @@
         <a class="open-link" id="linkCalyx" href="/calyx.html">Open</a>
       </div>
 
+      <div class="module">
+        <div class="module-title">Observation Engine</div>
+        <div class="module-desc">Immutable evidence feeding Evaluation and the Mission Brief: current observations, domain coverage, scan history.</div>
+        <a class="open-link" id="linkObservations" href="/observations.html">Open</a>
+      </div>
+
       <div class="module disabled">
         <div class="module-title">GitHub / Repo Status <span class="badge soon">coming soon</span></div>
         <div class="module-desc">CI status, open PRs, and stale branches across Orchid Continuum repos.</div>
@@ -130,7 +136,7 @@
   var params = new URLSearchParams(window.location.search);
   var token = params.get('token');
   if (token) {
-    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx'].forEach(function(id){
+    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations'].forEach(function(id){
       var el = document.getElementById(id);
       var url = new URL(el.href, window.location.origin);
       url.searchParams.set('token', token);

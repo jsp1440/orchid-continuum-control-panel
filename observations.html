@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - Observation Engine</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1100px;margin:0 auto;padding:28px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+    .topbar h1{margin:0;font-size:30px}
+    .subtitle{color:var(--muted);font-size:14px;margin:8px 0 22px}
+    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .panel h2{margin:0 0 12px;font-size:19px}
+    .counts-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+    @media(max-width:800px){.counts-strip{grid-template-columns:repeat(2,1fr)}}
+    .count-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}
+    .count-value{font-size:22px;font-weight:800}
+    .count-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+    .coverage-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    @media(max-width:800px){.coverage-grid{grid-template-columns:repeat(2,1fr)}}
+    .coverage-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .coverage-domain{font-weight:700;margin-bottom:6px;text-transform:capitalize}
+    .coverage-meta{font-size:11px;color:var(--muted);line-height:1.6}
+    button{padding:8px 14px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer;font-size:13px}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .msg{margin-top:10px;font-size:13px}
+    .msg.error{color:var(--err)}
+    .msg.ok{color:var(--ok)}
+    .item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;font-size:13px}
+    .item-desc{margin-bottom:4px}
+    .item-meta{color:var(--muted);font-size:11px}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-right:6px}
+    .badge.critical{background:var(--err);color:#3a0a10}
+    .badge.warning{background:var(--warn);color:#3a2a04}
+    .badge.info{background:#2a3755;color:var(--text)}
+    .badge.active{background:var(--ok);color:#04261a}
+    .badge.superseded{background:#2a3755;color:var(--muted)}
+    .empty{color:var(--muted);font-size:13px}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    select{padding:8px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Observation Engine</h1>
+      <a class="back-link" id="backLink" href="/admin.html">Back to Mission Control</a>
+    </div>
+    <div class="subtitle">The evidence acquisition layer beneath Evaluation and the Mission Brief. Observations are immutable evidence - Evaluation interprets them, Engineering Memory stores decisions about them.</div>
+
+    <div id="countsStrip" class="counts-strip"></div>
+
+    <div class="panel">
+      <button id="observeBtn" type="button">Observe Now</button>
+      <span id="lastScan" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
+      <div id="observeMsg" class="msg"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Domain Coverage</h2>
+      <div id="coverageGrid" class="coverage-grid"><div class="empty">Loading...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Current Observations</h2>
+      <div class="filters">
+        <select id="domainFilter"><option value="">All domains</option></select>
+        <select id="statusFilter">
+          <option value="active" selected>active</option>
+          <option value="superseded">superseded</option>
+          <option value="">all statuses</option>
+        </select>
+        <button id="filterBtn" type="button">Apply</button>
+      </div>
+      <div id="observationsList"><div class="empty">Loading...</div></div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+  var ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+  (function(){
+    var backLink = document.getElementById('backLink');
+    if (backLink && ADMIN_TOKEN) {
+      var url = new URL(backLink.href, window.location.origin);
+      url.searchParams.set('token', ADMIN_TOKEN);
+      backLink.href = url.pathname + url.search;
+    }
+  })();
+
+  async function api(path, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {}, ADMIN_TOKEN ? {'Authorization': 'Bearer ' + ADMIN_TOKEN} : {});
+    var res = await fetch(path, opts);
+    var text = await res.text();
+    var data;
+    try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
+    if (!res.ok) throw new Error((data && data.detail) ? data.detail : ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function loadSummary(){
+    try {
+      var s = await api('/api/v1/observations/summary');
+      document.getElementById('countsStrip').innerHTML = [
+        ['Active', s.active_observations],
+        ['Total (all time)', s.total_observations],
+        ['Critical', s.active_by_severity.critical || 0],
+        ['Warning', s.active_by_severity.warning || 0]
+      ].map(function(pair){
+        return '<div class="count-box"><div class="count-value">' + esc(pair[1]) + '</div><div class="count-label">' + esc(pair[0]) + '</div></div>';
+      }).join('');
+      document.getElementById('lastScan').textContent = s.last_scan_at ? ('Last scan: ' + s.last_scan_at) : 'No scan has run yet.';
+    } catch(e) {
+      document.getElementById('countsStrip').innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function loadCoverage(){
+    var el = document.getElementById('coverageGrid');
+    var domainFilter = document.getElementById('domainFilter');
+    try {
+      var coverage = await api('/api/v1/observations/coverage');
+      el.innerHTML = coverage.map(function(c){
+        return '<div class="coverage-box">' +
+          '<div class="coverage-domain">' + esc(c.domain) + '</div>' +
+          '<div class="coverage-meta">' + esc(c.active_observations) + ' active / ' + esc(c.total_observations) + ' total</div>' +
+          '<div class="coverage-meta">available: ' + esc(c.sources_available.join(', ') || 'none') + '</div>' +
+          (c.sources_not_yet_available.length ? '<div class="coverage-meta">not yet available: ' + esc(c.sources_not_yet_available.join(', ')) + '</div>' : '') +
+          '</div>';
+      }).join('');
+      if (!domainFilter.dataset.loaded) {
+        coverage.forEach(function(c){
+          var opt = document.createElement('option');
+          opt.value = c.domain; opt.textContent = c.domain;
+          domainFilter.appendChild(opt);
+        });
+        domainFilter.dataset.loaded = '1';
+      }
+    } catch(e) {
+      el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function loadObservations(){
+    var el = document.getElementById('observationsList');
+    var domain = document.getElementById('domainFilter').value;
+    var status = document.getElementById('statusFilter').value;
+    var params = new URLSearchParams();
+    if (domain) params.set('domain', domain);
+    if (status) params.set('status', status);
+    try {
+      var rows = await api('/api/v1/observations?' + params.toString());
+      if (!rows.length) { el.innerHTML = '<div class="empty">No observations match this filter.</div>'; return; }
+      el.innerHTML = rows.map(function(o){
+        return '<div class="item">' +
+          '<div class="item-desc"><span class="badge ' + esc(o.severity) + '">' + esc(o.severity) + '</span>' +
+          '<span class="badge ' + esc(o.status) + '">' + esc(o.status) + '</span>' + esc(o.description) + '</div>' +
+          '<div class="item-meta">source: ' + esc(o.source) + ' &middot; domain: ' + esc(o.domain) +
+          ' &middot; confidence: ' + esc(o.confidence) + ' &middot; last seen: ' + esc(o.last_seen_at) + '</div>' +
+          '</div>';
+      }).join('');
+    } catch(e) {
+      el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function loadAll(){
+    await loadSummary();
+    await loadCoverage();
+    await loadObservations();
+  }
+
+  document.getElementById('observeBtn').addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('observeMsg');
+    btn.disabled = true;
+    msg.textContent = 'Observing...'; msg.className = 'msg';
+    try {
+      var task = await api('/api/v1/agents/observation_engine/run', {method: 'POST'});
+      if (task.status === 'failed') {
+        msg.textContent = 'Scan failed: ' + (task.last_error || 'unknown error');
+        msg.className = 'msg error';
+      } else {
+        msg.textContent = 'Scan complete: ' + (task.result_summary || '');
+        msg.className = 'msg ok';
+      }
+      await loadAll();
+    } catch(e) {
+      msg.textContent = 'Observe failed: ' + e.message; msg.className = 'msg error';
+    }
+    btn.disabled = false;
+  });
+
+  document.getElementById('filterBtn').addEventListener('click', loadObservations);
+
+  loadAll();
+})();
+</script>
+</body>
+</html>

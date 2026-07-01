@@ -313,3 +313,62 @@ when available - asking "what should we work on today" now returns
 reason, evidence, expected impact, suggested agent/tool, dependencies, and
 confidence in one answer, falling back to Phase Alpha's simpler format
 only when there is nothing to evaluate yet.
+
+## Observation Engine (Phase 1)
+
+The evidence acquisition layer beneath Evaluation and the Mission Brief -
+not another agent's private log, but a shared, immutable record of facts
+Calyx has directly observed. **Runs through the existing Agent Registry
+and Task Queue, not a new run path**: it's registered as agent_key
+`observation_engine`, executed via the same
+`POST /api/v1/agents/observation_engine/run` every other agent uses.
+
+**Eight sources, Phase 1** - all real, all already in this repository:
+Engineering Memory (decisions awaiting action), Agent Registry, Task
+Queue (failed runs), Agent Findings (open), Evaluation Engine (a score
+snapshot per domain), Mission Brief (a counts snapshot), repository
+metadata (`RENDER_GIT_COMMIT`, honestly "unknown" if unset), and a direct
+database connectivity check Calyx performs itself. Scientific literature,
+pollinator/mycorrhizal networks, and collaboration have **no data source
+anywhere in this repository** and are never fabricated - `GET
+/api/v1/observations/coverage` reports them plainly as unavailable.
+
+**Two kinds of fact, one reconciliation mechanism**: "state" facts
+(pending decisions, failed tasks, open findings, registry entries,
+repository commit, health) encode their current value into the
+observation's evidence id, so a changed fact is naturally a *different*
+id - reconciliation supersedes the old observation and inserts the new
+one, with the old row preserved (status `superseded`), never deleted or
+edited. "Snapshot" facts (Evaluation Engine's scores, Mission Brief's
+counts) encode the scan itself into the evidence id, so every scan
+accumulates as permanent history instead of being deduplicated -
+Evaluation and Mission Brief are both currently stateless, so this is
+the only place either gets a real history at all.
+
+**Evaluation Engine is untouched.** Observation Engine is built alongside
+it in Phase 1, not wired underneath it - rewiring Evaluation to read from
+`oc_observations` instead of live state is real, separate work for a
+later phase.
+
+### API
+
+```
+GET   /api/v1/observations/sources
+GET   /api/v1/observations              (filter by domain/source/status/severity)
+GET   /api/v1/observations/coverage
+GET   /api/v1/observations/summary
+POST  /api/v1/agents/observation_engine/run   (the scan trigger - reused, not new)
+```
+
+Gated by `ADMIN_PANEL_TOKEN`. A dashboard is served at `/observations.html`
+showing current observations, domain coverage, counts, last scan, and a
+manual "Observe Now" button.
+
+### Testing
+
+`test_observation.py` covers fact detection and reconciliation logic
+without touching a database - the same fetch/pure-logic split already
+used by `calyx.py` and `evaluation.py`. `fetch_state`-equivalent database
+reads happen only inside `run_observation_engine`; every `detect_*`
+function and `reconcile()` itself take already-fetched data and are
+fully unit-testable.

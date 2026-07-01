@@ -1,15 +1,23 @@
 # FILE: agents.py
-# Minimum AI Fabric substrate for exactly one grounded agent: Engineering Auditor.
+# AI Fabric substrate: the Agent Registry and Task Queue, and the agents
+# registered against them (Engineering Auditor, Observation Engine).
 #
 # This is deliberately NOT the full AI Fabric design (no Model Router, no
 # Event Bus, no Evaluation Engine, no Scheduler). It is the smallest real
-# substrate that lets one agent run, produce reviewable findings, and be
+# substrate that lets agents run, produce reviewable results, and be
 # observed from Mission Control - built on the same durable-queue pattern
 # already proven by the Brain Outbox (oc_memory_outbox).
 #
-# Agents propose findings; they never modify Engineering Memory decisions
-# directly. A finding is a draft record a human reviews, exactly like every
-# other "AI proposes, never auto-promotes" boundary in this project.
+# Agents propose findings/observations; they never modify Engineering
+# Memory decisions directly. Every result is a draft record a human
+# reviews, exactly like every other "AI proposes, never auto-promotes"
+# boundary in this project.
+#
+# Observation Engine's actual scan logic lives in observation.py, not
+# here - agents.py only imports its runner function and registers it, the
+# same way it would for any future agent. This keeps agents.py as pure
+# registry/queue infrastructure rather than growing per-agent logic
+# inline.
 
 import json
 import os
@@ -23,6 +31,7 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
 from admin import require_admin_token
+from observation import run_observation_engine
 
 router = APIRouter(
     prefix="/api/v1/agents",
@@ -129,6 +138,19 @@ def ensure_agent_tables(conn) -> None:
                 'engineering_auditor',
                 'Engineering Auditor',
                 'Flags implemented Engineering Memory decisions that have no linked commit, PR, release, document, or task.',
+                'active',
+                true
+            )
+            ON CONFLICT (agent_key) DO NOTHING
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO oc_agent_registry (agent_key, name, purpose, lifecycle_state, enabled)
+            VALUES (
+                'observation_engine',
+                'Observation Engine',
+                'Scans Engineering Memory, the Agent Registry, the Task Queue, Findings, Evaluation Engine, and Mission Brief state to record immutable observations as evidence.',
                 'active',
                 true
             )
@@ -267,6 +289,7 @@ def run_engineering_auditor(conn, task_id: str) -> dict[str, Any]:
 
 AGENT_RUNNERS = {
     "engineering_auditor": run_engineering_auditor,
+    "observation_engine": run_observation_engine,
 }
 
 
