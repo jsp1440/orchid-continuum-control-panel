@@ -38,6 +38,20 @@
     .answer{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px;white-space:pre-wrap;line-height:1.6}
     .example-qs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
     .example-qs button{margin-top:0;padding:6px 10px;font-size:12px;background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+    .scores-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+    @media(max-width:800px){.scores-strip{grid-template-columns:repeat(2,1fr)}}
+    .score-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
+    .score-value{font-size:26px;font-weight:800}
+    .score-value.null{color:var(--muted);font-size:16px}
+    .score-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+    .score-note{font-size:10px;color:var(--muted);margin-top:4px}
+    .priority-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;font-size:13px}
+    .priority-rank{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:12px;margin-right:6px}
+    .priority-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-left:6px}
+    .priority-badge.critical{background:var(--err);color:#3a0a10}
+    .priority-badge.high{background:var(--warn);color:#3a2a04}
+    .priority-badge.medium,.priority-badge.low{background:#2a3755;color:var(--text)}
+    .priority-meta{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.6}
   </style>
 </head>
 <body>
@@ -49,6 +63,14 @@
     <div class="subtitle">Mission Control is Calyx's workspace. Phase Alpha: read-only observation, analysis, and recommendation - no automatic execution, deployment, or self-approval.</div>
 
     <div id="countsStrip" class="counts-strip"></div>
+    <div id="scoresStrip" class="scores-strip"></div>
+
+    <div class="panel">
+      <h2>Priorities</h2>
+      <button id="evaluateBtn" type="button">Evaluate Now</button>
+      <div id="evaluateMsg" class="msg"></div>
+      <div id="prioritiesList" style="margin-top:12px"><div class="empty">Click "Evaluate Now" to rank current priorities.</div></div>
+    </div>
 
     <div class="panel">
       <h2>Ask Calyx</h2>
@@ -133,6 +155,39 @@
       '<div class="item-meta">' + esc(i.type) + ':' + esc(i.id) + (i.status ? ' &middot; ' + esc(i.status) : '') + '</div></div>';
   }
 
+  function renderScores(domainScores){
+    var order = ['engineering', 'scientific', 'mission_progress', 'collaboration'];
+    document.getElementById('scoresStrip').innerHTML = order.map(function(key){
+      var d = domainScores[key];
+      var valueHtml = (d.score === null || d.score === undefined)
+        ? '<div class="score-value null">No data</div>'
+        : '<div class="score-value">' + esc(d.score) + '</div>';
+      return '<div class="score-box">' + valueHtml +
+        '<div class="score-label">' + esc(d.label) + '</div>' +
+        '<div class="score-note">' + esc(d.data_coverage.not_yet_monitored.length) + ' signal type(s) not yet monitored</div></div>';
+    }).join('');
+  }
+
+  function renderPriorities(priorities){
+    var el = document.getElementById('prioritiesList');
+    if (!priorities.length) { el.innerHTML = '<div class="empty">No priorities - all tracked signals are currently clear.</div>'; return; }
+    el.innerHTML = priorities.map(function(p){
+      return '<div class="priority-item">' +
+        '<span class="priority-rank">' + esc(p.rank) + '</span>' +
+        '<strong>' + esc(p.domain) + '</strong>' +
+        '<span class="priority-badge ' + esc(p.priority) + '">' + esc(p.priority) + '</span>' +
+        '<div style="margin-top:6px">' + esc(p.reason) + '</div>' +
+        '<div class="priority-meta">' +
+          'Impact: ' + esc(p.expected_impact) + '<br>' +
+          'Agent: ' + esc(p.suggested_agent || 'none - human review') +
+          ' &middot; Tool: ' + esc(p.suggested_tool || 'none - human judgment') +
+          ' &middot; Confidence: ' + esc(p.confidence) + '<br>' +
+          'Dependencies: ' + esc(p.dependencies.length ? p.dependencies.join(', ') : 'none identified') +
+          ' &middot; Evidence: ' + esc(p.evidence.type) + ':' + esc(p.evidence.id) +
+        '</div></div>';
+    }).join('');
+  }
+
   async function loadBrief(){
     try {
       var brief = await api('/api/v1/calyx/mission-brief');
@@ -148,6 +203,9 @@
       ].map(function(pair){
         return '<div class="count-box"><div class="count-value">' + esc(pair[1]) + '</div><div class="count-label">' + esc(pair[0]) + '</div></div>';
       }).join('');
+
+      renderScores(brief.domain_scores);
+      renderPriorities(brief.priorities);
 
       var na = brief.next_action;
       document.getElementById('nextAction').innerHTML =
@@ -194,6 +252,26 @@
       document.getElementById('questionInput').value = q;
       askQuestion(q);
     });
+  });
+
+  document.getElementById('evaluateBtn').addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('evaluateMsg');
+    btn.disabled = true;
+    msg.textContent = 'Evaluating...'; msg.className = 'msg';
+    try {
+      var result = await api('/api/v1/calyx/evaluate', {method: 'POST'});
+      renderScores(result.domain_scores);
+      renderPriorities(result.priorities);
+      var created = result.proposed_decisions_created.length;
+      msg.textContent = created
+        ? created + ' new Engineering Memory decision(s) proposed for review (' + result.proposed_decisions_skipped_existing + ' already existed).'
+        : 'No new decisions proposed (' + result.proposed_decisions_skipped_existing + ' already existed for current top items).';
+      msg.className = 'msg ok';
+    } catch(e) {
+      msg.textContent = 'Evaluate failed: ' + e.message; msg.className = 'msg error';
+    }
+    btn.disabled = false;
   });
 
   loadBrief();

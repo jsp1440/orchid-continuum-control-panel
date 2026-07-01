@@ -256,16 +256,60 @@ Alpha introduces zero new database tables.**
 ```
 GET   /api/v1/calyx/mission-brief
 POST  /api/v1/calyx/ask
+POST  /api/v1/calyx/evaluate
 ```
 
 Gated by `ADMIN_PANEL_TOKEN`. A dashboard is served at `/calyx.html`
-showing the full Mission Brief plus an "Ask Calyx" box with the seven
-example questions as one-click buttons.
+showing the full Mission Brief, domain scores, ranked priorities, and an
+"Ask Calyx" box with the seven example questions as one-click buttons.
 
 ### Testing
 
-`test_calyx.py` covers the pure synthesis and intent-matching logic
-without touching a database (`fetch_state()` is the only function in
-`calyx.py` that opens a connection; everything else is a pure function
-over already-fetched data, which is what makes it unit-testable at all).
-Run with `pytest` after installing `requirements-dev.txt`.
+`test_calyx.py` and `test_evaluation.py` cover the pure synthesis,
+scoring, and intent-matching logic without touching a database
+(`fetch_state()` is the only function in `calyx.py` that opens a
+connection; everything else, including all of `evaluation.py`, is a pure
+function over already-fetched data, which is what makes it unit-testable
+at all). Run with `pytest` after installing `requirements-dev.txt`.
+
+## Evaluation Engine (Calyx Phase 2)
+
+Not an AI model - a deterministic, explainable scoring and prioritization
+layer (`evaluation.py`) that turns Calyx from "I know what exists" into
+"I know what should happen next."
+
+**Four domains, evaluated independently**, each producing a named score
+plus an itemized signal list (the score's exact arithmetic, not an opaque
+number):
+
+| Domain | Score | Real data source in this repo |
+|---|---|---|
+| Engineering | Engineering Health Score | Open findings, failed agent runs, failed Brain Outbox syncs, stale decision reviews |
+| Scientific | Scientific Opportunity Score | Taxonomy/image coverage (`orchid_taxonomy`/`images`, if present) - literature/pollinator/mycorrhiza/conservation gaps have **no data source yet** and are reported as such, not estimated |
+| Mission Progress | Mission Progress Score | Engineering Memory decision lifecycle status and relationships |
+| Collaboration | Collaboration Opportunity Score | **No data source exists anywhere in this repository** - always reports `score: null`, never a fabricated number |
+
+**Priority ranking**: every signal from every domain becomes a ranked
+priority item with `priority` / `reason` / `evidence` (a real record
+citation) / `expected_impact` / `dependencies` (derived from
+`parent_of` relationships) / `suggested_agent` (only when a real
+`agent_key` exists on the underlying record) / `suggested_tool` (a
+deterministic mapping to Claude Code, Python, SQL, Atlas, Harvesters, the
+Literature Pipeline, or a not-yet-built future system - never a hardcoded
+AI provider) / `confidence`. Ranking weight is `severity x domain`, stated
+plainly in code, not a black box.
+
+**The one write path**: `GET /mission-brief` and `POST /ask` remain pure
+reads with no side effects. `POST /evaluate` is the deliberate action
+(mirroring "Run Now" for agents) that also proposes Engineering Memory
+decisions for the top critical/high-priority items - through
+`memory.create_decision()`, the same entry point every other creator
+uses, always at status `proposed`, capped at 3 per call, and deduplicated
+by an evidence marker embedded in the decision's `context` so repeated
+calls don't spam duplicate proposals.
+
+`/api/v1/calyx/ask`'s answers are enriched with the same priority data
+when available - asking "what should we work on today" now returns
+reason, evidence, expected impact, suggested agent/tool, dependencies, and
+confidence in one answer, falling back to Phase Alpha's simpler format
+only when there is nothing to evaluate yet.

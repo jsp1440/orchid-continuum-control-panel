@@ -1,20 +1,24 @@
 # FILE: calyx.py
-# Calyx Alpha - the first operational version of Calyx.
+# Calyx - the directing intelligence of the Orchid Continuum.
 #
-# Calyx is not another entry in the Agent Registry - it is the directing
-# intelligence that reads across Engineering Memory, the Task Queue, the
-# Agent Registry, Engineering Findings, and the Brain Outbox to produce a
-# Mission Brief and answer grounded questions about institutional state.
+# Calyx is not another entry in the Agent Registry - it reads across
+# Engineering Memory, the Task Queue, the Agent Registry, Engineering
+# Findings, and the Brain Outbox to produce a Mission Brief and answer
+# grounded questions about institutional state.
 #
-# Phase Alpha is deliberately read-only: Calyx observes, analyzes,
-# recommends, and answers questions - it never writes to any table, never
-# executes code, never deploys, and never approves its own work. There is
-# no Model Router or LLM call in this phase (the AI Fabric's Model Router
-# does not exist yet); every answer is synthesized from real query results
-# through deterministic templates, not invented text and not a
-# general-purpose chat model. Decision-proposal automation (turning a
-# significant recommendation into a draft Engineering Memory decision) is
-# explicitly deferred to a later phase - Alpha only observes and reports.
+# Phase Alpha (Mission Brief, /ask) is read-only. Phase 2 (the Evaluation
+# Engine, evaluation.py) adds explainable scoring/prioritization and one
+# deliberate write path: POST /evaluate may propose Engineering Memory
+# decisions for top-ranked recommendations - through the same
+# memory.create_decision() every other caller uses, always at status
+# "proposed", deduplicated, never auto-accepted. GET /mission-brief and
+# POST /ask remain pure reads with no side effects, as a GET or an "ask"
+# should never have.
+#
+# There is still no Model Router or LLM call anywhere in this file - every
+# answer and every score is synthesized from real query results through
+# deterministic logic, not invented text and not a general-purpose chat
+# model.
 
 import os
 from datetime import datetime, timedelta, timezone
@@ -25,6 +29,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.rows import dict_row
 from pydantic import BaseModel
 
+import evaluation
+import memory
 from admin import require_admin_token
 
 router = APIRouter(
@@ -58,19 +64,80 @@ def _table_exists(conn, table_name: str) -> bool:
         return bool(cur.fetchone()["exists"])
 
 
+def _fetch_columns(conn, table_name: str) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return {row["column_name"] for row in cur.fetchall()}
+
+
+def _first_existing(cols: set[str], preferred: list[str]) -> Optional[str]:
+    for c in preferred:
+        if c in cols:
+            return c
+    return None
+
+
+def _fetch_taxonomy_coverage(conn) -> Optional[dict[str, Any]]:
+    """Best-effort read of the pre-existing orchid_taxonomy/images tables
+    (the same tables app.py's public widget endpoints already read) to
+    compute how many taxa have zero linked images. Returns None if those
+    tables don't exist or don't have a recognizable name column - this is
+    intentionally defensive since Calyx does not own this schema and its
+    exact shape has evolved organically (see app.py's own table_exists/
+    fetch_columns pattern, which this mirrors).
+    """
+    if not _table_exists(conn, "orchid_taxonomy"):
+        return None
+    tax_cols = _fetch_columns(conn, "orchid_taxonomy")
+    name_col = _first_existing(tax_cols, ["scientific_name", "canonical_name", "accepted_scientific_name", "name"])
+    if not name_col:
+        return None
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(DISTINCT {name_col}) AS n FROM public.orchid_taxonomy")
+        total = cur.fetchone()["n"]
+
+    without_images = None
+    if total and _table_exists(conn, "images"):
+        img_cols = _fetch_columns(conn, "images")
+        img_name_col = _first_existing(img_cols, ["scientific_name"])
+        if img_name_col:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT t.{name_col}) AS n
+                    FROM public.orchid_taxonomy t
+                    LEFT JOIN public.images i
+                        ON i.{img_name_col} = t.{name_col} AND i.url IS NOT NULL
+                    WHERE i.{img_name_col} IS NULL
+                    """
+                )
+                without_images = cur.fetchone()["n"]
+
+    return {"total_taxa": total, "taxa_without_images": without_images}
+
+
 def fetch_state(conn) -> dict[str, Any]:
-    """Reads Engineering Memory, Task Queue, Agent Registry, Findings, and
-    Brain Outbox. Returns raw rows only - no synthesis happens here, so
-    this function is the only part of Calyx that touches the database.
-    Tables that don't exist yet (e.g. a fresh database where no agent has
-    ever run) are treated as empty, not an error - Calyx does not own or
-    create any of these tables.
+    """Reads Engineering Memory (decisions + relationships), the Task
+    Queue, the Agent Registry, Engineering Findings, the Brain Outbox, and
+    (best-effort) taxonomy/image coverage. Returns raw rows only - no
+    synthesis happens here, so this function is the only part of Calyx
+    that touches the database. Tables that don't exist yet (e.g. a fresh
+    database where nothing has run) are treated as empty, not an error -
+    Calyx does not own or create any of these tables.
     """
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     state: dict[str, Any] = {"fetched_at": datetime.now(timezone.utc), "since": since}
 
     tables = [
         ("oc_memory_decisions", "decisions", "updated_at"),
+        ("oc_memory_decision_relationships", "relationships", "created_at"),
         ("oc_agent_registry", "agents", "agent_key"),
         ("oc_agent_tasks", "tasks", "created_at"),
         ("oc_agent_findings", "findings", "created_at"),
@@ -83,6 +150,8 @@ def fetch_state(conn) -> dict[str, Any]:
                 state[key] = cur.fetchall()
             else:
                 state[key] = []
+
+    state["taxonomy_coverage"] = _fetch_taxonomy_coverage(conn)
 
     return state
 
@@ -266,6 +335,25 @@ def synthesize_brief(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ---------- Evaluation Engine integration (pure) ----------
+
+def enrich_brief(brief: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """Adds domain_scores, priorities, and top_priority to an already-built
+    Mission Brief. Additive only - brief["next_action"] (Phase Alpha's
+    original recommendation) is left untouched for backward compatibility;
+    brief["top_priority"] is the new, richer recommendation carrying
+    domain/tool/dependencies/confidence, ranked by evaluation.py's
+    explainable weight formula rather than the older fixed precedence
+    order. When there are no priorities (nothing to evaluate yet),
+    top_priority is None and callers fall back to next_action.
+    """
+    result = evaluation.run_evaluation(state)
+    brief["domain_scores"] = result["domain_scores"]
+    brief["priorities"] = result["priorities"]
+    brief["top_priority"] = result["priorities"][0] if result["priorities"] else None
+    return brief
+
+
 # ---------- conversation: intent matching + answer templating (pure) ----------
 
 INTENT_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
@@ -294,6 +382,16 @@ def _format_items(items: list[dict[str, Any]]) -> str:
 
 def build_answer(intent: str, brief: dict[str, Any]) -> str:
     if intent == "next_action":
+        tp = brief.get("top_priority")
+        if tp:
+            agent_note = f" Suggested agent: {tp['suggested_agent']}." if tp.get("suggested_agent") else " No agent assigned - requires human review."
+            tool_note = f" Suggested tool: {tp['suggested_tool']}." if tp.get("suggested_tool") else " No tool applies - requires human judgment."
+            deps_note = f" Dependencies: {', '.join(tp['dependencies'])}." if tp.get("dependencies") else " No dependencies identified."
+            return (
+                f"[{tp['domain']}, priority: {tp['priority']}] {tp['reason']} "
+                f"Expected impact: {tp['expected_impact']}{agent_note}{tool_note}{deps_note} "
+                f"(confidence: {tp['confidence']}, evidence: {tp['evidence']['type']}:{tp['evidence']['id']})"
+            )
         na = brief["next_action"]
         agent_note = f" (agent: {na['assigned_agent']})" if na.get("assigned_agent") else " (requires human review - no agent assigned)"
         return f"{na['summary']}{agent_note} — {na['reason']}"
@@ -352,12 +450,29 @@ class AskRequest(BaseModel):
     question: str
 
 
+MAX_AUTO_PROPOSED_DECISIONS = 3
+AUTO_PROPOSAL_PRIORITIES = {"critical", "high"}
+
+
+def _evidence_marker(evidence: dict[str, Any]) -> str:
+    return f"Auto-proposed by Calyx Evaluation Engine. Evidence: {evidence['type']}:{evidence['id']}."
+
+
+def _proposal_already_exists(conn, marker: str) -> bool:
+    if not _table_exists(conn, "oc_memory_decisions"):
+        return False
+    with conn.cursor() as cur:
+        cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE context LIKE %s LIMIT 1", (f"%{marker}%",))
+        return cur.fetchone() is not None
+
+
 @router.get("/mission-brief")
 def get_mission_brief():
     try:
         with get_conn() as conn:
             state = fetch_state(conn)
         brief = synthesize_brief(state)
+        brief = enrich_brief(brief, state)
         brief["generated_at"] = state["fetched_at"]
         return brief
     except Exception as exc:
@@ -370,8 +485,63 @@ def ask(payload: AskRequest):
         with get_conn() as conn:
             state = fetch_state(conn)
         brief = synthesize_brief(state)
+        brief = enrich_brief(brief, state)
         intent = match_intent(payload.question)
         answer = build_answer(intent, brief)
         return {"question": payload.question, "matched_intent": intent, "answer": answer}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Ask failed: {exc}")
+
+
+@router.post("/evaluate")
+def evaluate():
+    """Runs the full Evaluation Engine and, for the highest-ranked
+    critical/high priority items (capped at MAX_AUTO_PROPOSED_DECISIONS),
+    proposes an Engineering Memory decision via memory.create_decision() -
+    the same public entry point every other creator uses, always at
+    status "proposed", never "accepted". Deduplicated by embedding an
+    evidence marker in the decision's context and checking for it first,
+    so calling this repeatedly does not spam duplicate proposals.
+
+    Unlike GET /mission-brief and POST /ask, this endpoint has a real side
+    effect - that is why it is a distinct, explicit POST action a human
+    (or the dashboard's "Evaluate Now" button) must trigger, rather than
+    something that happens on every read.
+    """
+    try:
+        with get_conn() as conn:
+            state = fetch_state(conn)
+        result = evaluation.run_evaluation(state)
+
+        created: list[dict[str, Any]] = []
+        skipped_existing = 0
+        candidates = [p for p in result["priorities"] if p["priority"] in AUTO_PROPOSAL_PRIORITIES]
+
+        with get_conn() as conn:
+            for item in candidates[:MAX_AUTO_PROPOSED_DECISIONS]:
+                marker = _evidence_marker(item["evidence"])
+                if _proposal_already_exists(conn, marker):
+                    skipped_existing += 1
+                    continue
+
+                payload = memory.DecisionCreate(
+                    title=f"Calyx recommendation ({item['domain']}): {item['reason'][:120]}",
+                    context=marker,
+                    decision=item["reason"],
+                    rationale=f"{item['expected_impact']} Confidence: {item['confidence']}.",
+                    affected_systems=[item["domain"]],
+                    created_by="calyx_evaluation_engine",
+                )
+                created_decision = memory.create_decision(payload)
+                created.append(created_decision)
+
+        return {
+            "domain_scores": result["domain_scores"],
+            "priorities": result["priorities"],
+            "proposed_decisions_created": created,
+            "proposed_decisions_skipped_existing": skipped_existing,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Evaluate failed: {exc}")
