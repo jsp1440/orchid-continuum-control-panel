@@ -42,6 +42,20 @@ def get_conn():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = %s
+            ) AS exists
+            """,
+            (table_name,),
+        )
+        return bool(cur.fetchone()["exists"])
+
+
 _TABLES_READY = False
 
 
@@ -147,7 +161,23 @@ def run_engineering_auditor(conn, task_id: str) -> dict[str, Any]:
     Reconciles on every run: decisions no longer missing links have their
     prior open finding auto-resolved, mirroring the reconciliation pattern
     already used for Engineering Memory's own findings-style data.
+
+    Defensive by design: Engineering Auditor does not own
+    oc_memory_decisions/oc_memory_decision_links (Engineering Memory does),
+    so on a fresh database where no decision has ever been recorded, those
+    tables may not exist yet. That is treated as "nothing to audit," not
+    an error - the same defensive pattern used throughout this codebase
+    (table_exists checks in app.py, _table_exists in calyx.py).
     """
+    if not (_table_exists(conn, "oc_memory_decisions") and _table_exists(conn, "oc_memory_decision_links")):
+        return {
+            "implemented_decisions_checked": 0,
+            "unlinked_found": 0,
+            "new_findings": 0,
+            "auto_resolved_findings": 0,
+            "note": "Engineering Memory tables not present yet - nothing to audit.",
+        }
+
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM oc_memory_decisions WHERE status = 'implemented'")
         implemented_count = cur.fetchone()["n"]

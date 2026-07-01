@@ -216,3 +216,56 @@ PATCH  /api/v1/agents/findings/{finding_id}
 All gated by the same `ADMIN_PANEL_TOKEN` described above. A minimal UI is
 served at `/agents.html` showing each registered agent, its last run,
 "Run Now," and its findings with acknowledge/resolve actions.
+
+## Calyx (Alpha)
+
+Calyx is the Orchid Continuum's Project Director and Chief Scientific
+Intelligence - not another entry in the Agent Registry, but the directing
+intelligence that reads across it. This is **Phase Alpha**: enough to be
+operational, not full autonomy.
+
+**What Calyx Alpha does**: reads Engineering Memory, the Task Queue, the
+Agent Registry, Engineering Findings, and the Brain Outbox, and produces a
+Mission Brief answering what's healthy, broken, blocked, waiting for
+review, and closest to completion - plus a single recommended next action,
+citing the specific decision/finding/task it's based on, and naming which
+registered agent (if any) is suited to it. If no real agent fits, Calyx
+says so rather than inventing one.
+
+**What Calyx Alpha does not do**: write to any table, execute code, deploy
+anything, or approve its own work. It observes, analyzes, recommends, and
+answers questions - that's the entire Phase Alpha scope. Turning a
+significant recommendation into a drafted Engineering Memory decision is
+explicitly deferred to a later phase.
+
+**On "conversation"**: there is no LLM call in this phase, and no Model
+Router (that component doesn't exist yet, per the AI Fabric architecture
+document's Operational Readiness section). `/api/v1/calyx/ask`
+matches a question against the same set of question patterns the Mission
+Brief already answers, and returns a template filled in from real query
+results. It's grounded, testable, and honest about its limits - not a
+general-purpose chat model wearing Calyx's name.
+
+Every table Calyx reads already exists and is owned by Engineering Memory
+or the Agent substrate (`oc_memory_decisions`, `oc_memory_outbox`,
+`oc_agent_registry`, `oc_agent_tasks`, `oc_agent_findings`) - **Calyx
+Alpha introduces zero new database tables.**
+
+### API
+
+```
+GET   /api/v1/calyx/mission-brief
+POST  /api/v1/calyx/ask
+```
+
+Gated by `ADMIN_PANEL_TOKEN`. A dashboard is served at `/calyx.html`
+showing the full Mission Brief plus an "Ask Calyx" box with the seven
+example questions as one-click buttons.
+
+### Testing
+
+`test_calyx.py` covers the pure synthesis and intent-matching logic
+without touching a database (`fetch_state()` is the only function in
+`calyx.py` that opens a connection; everything else is a pure function
+over already-fetched data, which is what makes it unit-testable at all).
+Run with `pytest` after installing `requirements-dev.txt`.

@@ -17,6 +17,7 @@ from psycopg.rows import dict_row
 from admin import require_admin_token
 from admin import router as admin_router
 from agents import router as agents_router
+from calyx import router as calyx_router
 from memory import router as memory_router
 
 APP_TITLE = "Orchid Continuum API"
@@ -33,6 +34,7 @@ app.add_middleware(
 app.include_router(memory_router)
 app.include_router(admin_router)
 app.include_router(agents_router)
+app.include_router(calyx_router)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -473,6 +475,14 @@ def serve_agents_html():
     path = Path(__file__).resolve().parent / "agents.html"
     if not path.exists():
         raise HTTPException(status_code=404, detail="agents.html not found")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.get("/calyx.html", dependencies=[Depends(require_admin_token)])
+def serve_calyx_html():
+    path = Path(__file__).resolve().parent / "calyx.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="calyx.html not found")
     return FileResponse(path, media_type="text/html")
 
 
