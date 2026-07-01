@@ -1,7 +1,69 @@
 # orchid-continuum-control-panel
 Control panel dashboard for Orchid Continuum harvesters and database status
 
+## Admin / Control Panel
+
+This repo serves its own admin UI directly - it is not a separate frontend
+project and does not currently depend on the main Orchid Continuum website
+repo. FastAPI serves a handful of standalone HTML pages itself (this is the
+same pattern already used for `/atlas.html`); there is no separate
+JavaScript framework or build step. The public Orchid Continuum website is
+a different system and is not required for the admin panel to work.
+Connecting the admin panel to that site later (e.g. linking to it, or
+embedding it) is a future step, not a dependency of this one.
+
+The admin landing page is served at `/admin.html` and links to the internal
+tools below. It is **not** linked from anywhere on the public site or from
+any other page in this repo.
+
+### Enabling the admin panel
+
+1. Set the `ADMIN_PANEL_TOKEN` environment variable to a long random string
+   (e.g. `openssl rand -hex 32`). This is the only credential - there is no
+   username, no database of users, no password reset flow.
+2. If `ADMIN_PANEL_TOKEN` is not set, every admin route (`/admin.html`,
+   `/engineering-memory.html`, and everything under `/api/v1/memory/*`)
+   returns `503 Admin panel is disabled` - it does **not** fall open to the
+   public. There is no hard-coded password anywhere in this repo.
+
+### Accessing it
+
+Visit `/admin.html?token=<your ADMIN_PANEL_TOKEN>`. The page carries the
+token forward automatically to the pages it links to (Engineering Memory,
+Brain Outbox). API calls from those pages send the token as an
+`Authorization: Bearer` header; the browser-facing pages also accept it as
+a `?token=` query parameter, since a plain link/bookmark can't set custom
+headers.
+
+### Security caveats
+
+This is explicitly a **placeholder gate**, not a real authentication
+system:
+
+- It's a single shared secret, not per-user accounts - anyone with the
+  token has full access, and there's no way to revoke one person's access
+  without rotating the token for everyone.
+- The token can appear in browser history and server access logs because
+  it's accepted as a URL query parameter (needed so the plain HTML pages
+  work without custom headers). Treat the token as sensitive and rotate it
+  if you suspect it has leaked.
+- There is no session expiry, no rate limiting, no audit log of who used
+  the token.
+- Do not reuse this token as a password anywhere else.
+
+### Future plan for real authentication
+
+This gate exists to stop the admin surface from being wide open while a
+real system is designed - it is intentionally not more than that. A future
+iteration should replace it with per-user accounts (or SSO), real sessions,
+and role-based permissions, consistent with the identity/permission model
+already discussed for the Engineering Operations Center. That is a
+deliberately separate, larger piece of work, not part of this change.
+
 ## Engineering Memory / Brain Outbox
+
+Reachable from the Admin / Control Panel page above, not just as a
+standalone page. Gated by the same `ADMIN_PANEL_TOKEN` described above.
 
 The Orchid Continuum Brain is a separate system, and this Control Panel does
 not have live access to it today. Rather than let engineering decisions live

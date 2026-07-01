@@ -16,11 +16,17 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/v1/memory", tags=["Engineering Memory"])
+from admin import require_admin_token
+
+router = APIRouter(
+    prefix="/api/v1/memory",
+    tags=["Engineering Memory"],
+    dependencies=[Depends(require_admin_token)],
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 

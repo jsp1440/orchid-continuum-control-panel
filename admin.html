@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - Admin / Control Panel</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1000px;margin:0 auto;padding:28px}
+    .topbar{margin-bottom:8px}
+    .topbar h1{margin:0;font-size:30px}
+    .subtitle{color:var(--muted);font-size:14px;margin:8px 0 24px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+    @media(max-width:700px){.grid{grid-template-columns:1fr}}
+    .module{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:8px}
+    .module.disabled{opacity:.5}
+    .module-title{font-size:17px;font-weight:700}
+    .module-desc{font-size:13px;color:var(--muted);line-height:1.5;flex-grow:1}
+    .module a.open-link{align-self:flex-start;text-decoration:none;color:#fff;background:var(--blue);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:700}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
+    .badge.soon{background:#2a3755;color:var(--muted)}
+    .msg{margin-top:18px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar"><h1>Orchid Continuum Admin / Control Panel</h1></div>
+    <div class="subtitle">Internal operations. Not linked from the public site.</div>
+
+    <div class="grid">
+      <div class="module">
+        <div class="module-title">Engineering Memory</div>
+        <div class="module-desc">Record engineering decisions, track lifecycle status, relationships, and links.</div>
+        <a class="open-link" id="linkMemory" href="/engineering-memory.html">Open</a>
+      </div>
+
+      <div class="module">
+        <div class="module-title">Brain Outbox</div>
+        <div class="module-desc">Pending, failed, and confirmed Brain sync messages (same page as Engineering Memory).</div>
+        <a class="open-link" id="linkOutbox" href="/engineering-memory.html#outboxSection">Open</a>
+      </div>
+
+      <div class="module">
+        <div class="module-title">Health Check</div>
+        <div class="module-desc">Raw service liveness check.</div>
+        <a class="open-link" href="/health" target="_blank" rel="noopener">Open</a>
+      </div>
+
+      <div class="module">
+        <div class="module-title">Brain / DB Status</div>
+        <div class="module-desc">Row counts and harvest state across known tables.</div>
+        <a class="open-link" href="/api/brain/status" target="_blank" rel="noopener">Open</a>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">GitHub / Repo Status <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">CI status, open PRs, and stale branches across Orchid Continuum repos.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Website Health <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Uptime and latency checks for public-facing Orchid Continuum sites.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Grants Tracker <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Grant applications and deadlines.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Partner Follow-ups <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Partner contacts and outstanding follow-up items.</div>
+      </div>
+    </div>
+
+    <div class="msg">
+      This is a placeholder access gate (a single shared token), not full user
+      authentication. See the README for security caveats and the plan for
+      real authentication.
+    </div>
+  </div>
+
+<script>
+(function(){
+  var params = new URLSearchParams(window.location.search);
+  var token = params.get('token');
+  if (token) {
+    ['linkMemory', 'linkOutbox'].forEach(function(id){
+      var el = document.getElementById(id);
+      var url = new URL(el.href, window.location.origin);
+      url.searchParams.set('token', token);
+      el.href = url.pathname + url.search + url.hash;
+    });
+  }
+})();
+</script>
+</body>
+</html>
