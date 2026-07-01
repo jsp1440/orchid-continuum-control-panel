@@ -1,22 +1,33 @@
 # orchid-continuum-control-panel
 Control panel dashboard for Orchid Continuum harvesters and database status
 
-## Admin / Control Panel
+## Orchid Continuum Mission Control
 
-This repo serves its own admin UI directly - it is not a separate frontend
-project and does not currently depend on the main Orchid Continuum website
-repo. FastAPI serves a handful of standalone HTML pages itself (this is the
-same pattern already used for `/atlas.html`); there is no separate
-JavaScript framework or build step. The public Orchid Continuum website is
-a different system and is not required for the admin panel to work.
-Connecting the admin panel to that site later (e.g. linking to it, or
+Mission Control is the password-protected administrative landing layer for
+the Orchid Continuum - not a single tool. **Engineering Memory is one
+module inside it**, not the product itself. The landing page shows module
+cards for what's live today (Engineering Memory, Brain Outbox, Health
+Check, Brain/DB Status, Atlas) plus disabled placeholders for what's
+planned (GitHub/Repo Status, Website Health, Grants Tracker, Partner
+Follow-ups, Research Station, Conservation Ops, Education/OCU). More
+modules will be added to this same landing page over time; none of them
+require rebuilding the gate or the layout.
+
+This repo serves its own Mission Control UI directly - it is not a separate
+frontend project and does not currently depend on the main Orchid Continuum
+website repo. FastAPI serves a handful of standalone HTML pages itself
+(this is the same pattern already used for `/atlas.html`); there is no
+separate JavaScript framework or build step. The public Orchid Continuum
+website is a different system and is not required for Mission Control to
+work. Connecting Mission Control to that site later (e.g. linking to it, or
 embedding it) is a future step, not a dependency of this one.
 
-The admin landing page is served at `/admin.html` and links to the internal
-tools below. It is **not** linked from anywhere on the public site or from
-any other page in this repo.
+The Mission Control landing page is served at `/admin.html` (the route name
+is unchanged; only the user-facing name is "Mission Control") and links to
+the internal tools below. It is **not** linked from anywhere on the public
+site or from any other page in this repo.
 
-### Enabling the admin panel
+### Enabling Mission Control
 
 1. Set the `ADMIN_PANEL_TOKEN` environment variable to a long random string
    (e.g. `openssl rand -hex 32`). This is the only credential - there is no
@@ -34,6 +45,10 @@ Brain Outbox). API calls from those pages send the token as an
 `Authorization: Bearer` header; the browser-facing pages also accept it as
 a `?token=` query parameter, since a plain link/bookmark can't set custom
 headers.
+
+Current auth is a **temporary shared-token gate** - a single secret string,
+not individual logins. It exists only to stop the administrative surface
+from being wide open while a real system is designed.
 
 ### Security caveats
 
@@ -62,8 +77,9 @@ deliberately separate, larger piece of work, not part of this change.
 
 ## Engineering Memory / Brain Outbox
 
-Reachable from the Admin / Control Panel page above, not just as a
-standalone page. Gated by the same `ADMIN_PANEL_TOKEN` described above.
+One module within Mission Control (see above), not the whole product.
+Reachable from the Mission Control landing page, not just as a standalone
+page. Gated by the same `ADMIN_PANEL_TOKEN` described above.
 
 The Orchid Continuum Brain is a separate system, and this Control Panel does
 not have live access to it today. Rather than let engineering decisions live

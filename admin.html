@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Orchid Continuum - Admin / Control Panel</title>
+  <title>Orchid Continuum Mission Control</title>
   <style>
     :root {
       --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
@@ -25,12 +25,19 @@
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
     .badge.soon{background:#2a3755;color:var(--muted)}
     .msg{margin-top:18px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px}
+    .mission{color:var(--text);font-size:14px;line-height:1.6;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-bottom:22px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="topbar"><h1>Orchid Continuum Admin / Control Panel</h1></div>
+    <div class="topbar"><h1>Orchid Continuum Mission Control</h1></div>
     <div class="subtitle">Internal operations. Not linked from the public site.</div>
+
+    <div class="mission">
+      Mission Control coordinates the Orchid Continuum's technical, scientific,
+      conservation, education, and partnership systems. Engineering Memory is
+      one module within the larger administrative layer.
+    </div>
 
     <div class="grid">
       <div class="module">
@@ -57,6 +64,12 @@
         <a class="open-link" href="/api/brain/status" target="_blank" rel="noopener">Open</a>
       </div>
 
+      <div class="module">
+        <div class="module-title">Atlas</div>
+        <div class="module-desc">Region profile, habitat intelligence, and orchid gallery explorer.</div>
+        <a class="open-link" href="/atlas.html" target="_blank" rel="noopener">Open</a>
+      </div>
+
       <div class="module disabled">
         <div class="module-title">GitHub / Repo Status <span class="badge soon">coming soon</span></div>
         <div class="module-desc">CI status, open PRs, and stale branches across Orchid Continuum repos.</div>
@@ -75,6 +88,21 @@
       <div class="module disabled">
         <div class="module-title">Partner Follow-ups <span class="badge soon">coming soon</span></div>
         <div class="module-desc">Partner contacts and outstanding follow-up items.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Research Station <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Research operations coordination.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Conservation Ops <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Conservation program and action tracking.</div>
+      </div>
+
+      <div class="module disabled">
+        <div class="module-title">Education / OCU <span class="badge soon">coming soon</span></div>
+        <div class="module-desc">Orchid Continuum University coordination.</div>
       </div>
     </div>
 
