@@ -7,11 +7,11 @@ Mission Control is the password-protected administrative landing layer for
 the Orchid Continuum - not a single tool. **Engineering Memory is one
 module inside it**, not the product itself. The landing page shows module
 cards for what's live today (Engineering Memory, Brain Outbox, Health
-Check, Brain/DB Status, Atlas) plus disabled placeholders for what's
-planned (GitHub/Repo Status, Website Health, Grants Tracker, Partner
-Follow-ups, Research Station, Conservation Ops, Education/OCU). More
-modules will be added to this same landing page over time; none of them
-require rebuilding the gate or the layout.
+Check, Brain/DB Status, Atlas, AI Agents) plus disabled placeholders for
+what's planned (GitHub/Repo Status, Website Health, Grants Tracker,
+Partner Follow-ups, Research Station, Conservation Ops, Education/OCU).
+More modules will be added to this same landing page over time; none of
+them require rebuilding the gate or the layout.
 
 This repo serves its own Mission Control UI directly - it is not a separate
 frontend project and does not currently depend on the main Orchid Continuum
@@ -170,3 +170,49 @@ A minimal UI is served at `/engineering-memory.html` showing recent
 decisions with their lifecycle status (changeable inline), an expandable
 details panel per decision for relationships and links, and
 pending/failed/confirmed Brain sync status.
+
+## AI Agents (Engineering Auditor - Phase 1)
+
+This is the minimum substrate for exactly one grounded AI agent - not the
+full AI Fabric design (no Model Router, Event Bus, Evaluation Engine, or
+Scheduler yet). It exists to prove the pattern with one real agent before
+building more.
+
+- **`oc_agent_registry`** - catalog of agent definitions (key, name,
+  purpose, lifecycle state, enabled flag). Seeded with one entry:
+  `engineering_auditor`.
+- **`oc_agent_tasks`** / **`oc_agent_task_events`** - a durable run queue
+  for agent executions, following the exact same pattern as the Brain
+  Outbox (`oc_memory_outbox`/`oc_memory_outbox_events`): one row per run,
+  a status field, an attempt count, and an append-only event log.
+- **`oc_agent_findings`** - what an agent produces. Findings are **draft,
+  reviewable records** - an agent never modifies Engineering Memory
+  decisions directly. A human (or a future approval workflow) acknowledges
+  or resolves a finding explicitly.
+
+**Engineering Auditor** reads `oc_memory_decisions` and
+`oc_memory_decision_links`: any decision with `status = 'implemented'` and
+zero linked commits/PRs/releases/documents/tasks gets a
+`missing_implementation_link` finding. On every run, findings for
+decisions that are no longer missing links are automatically marked
+`resolved` - the same reconciliation approach used elsewhere in this
+project's monitoring design (open new, auto-resolve what's no longer
+true).
+
+Runs are triggered manually today (`POST /run` or the "Run Now" button in
+the UI) - there is no scheduler in Phase 1.
+
+### API
+
+```
+GET    /api/v1/agents
+GET    /api/v1/agents/{agent_key}
+POST   /api/v1/agents/{agent_key}/run
+GET    /api/v1/agents/{agent_key}/tasks
+GET    /api/v1/agents/{agent_key}/findings
+PATCH  /api/v1/agents/findings/{finding_id}
+```
+
+All gated by the same `ADMIN_PANEL_TOKEN` described above. A minimal UI is
+served at `/agents.html` showing each registered agent, its last run,
+"Run Now," and its findings with acknowledge/resolve actions.
