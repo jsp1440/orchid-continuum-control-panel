@@ -24,8 +24,27 @@ router = APIRouter(prefix="/api/v1/memory", tags=["Engineering Memory"])
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-DECISION_STATUSES = {"proposed", "accepted", "superseded", "rejected"}
+DECISION_STATUSES = {
+    "proposed", "under_review", "accepted", "implemented",
+    "deprecated", "superseded", "rejected",
+}
 SYNC_STATUSES = {"pending", "sent", "confirmed", "failed"}
+
+# Valid forward transitions. Anything not listed here is rejected by the
+# status-change endpoint - this is intentionally a small, explicit state
+# machine rather than a free-form status field.
+DECISION_TRANSITIONS: dict[str, set[str]] = {
+    "proposed": {"under_review", "rejected"},
+    "under_review": {"accepted", "rejected"},
+    "accepted": {"implemented", "deprecated", "superseded"},
+    "implemented": {"deprecated", "superseded"},
+    "deprecated": {"superseded"},
+    "superseded": set(),
+    "rejected": set(),
+}
+
+RELATIONSHIP_TYPES = {"supersedes", "parent_of", "conflicts_with", "related_to"}
+LINK_TYPES = {"task", "finding", "commit", "pull_request", "release", "document", "external_url"}
 
 
 def get_conn():
@@ -56,6 +75,33 @@ def ensure_memory_tables(conn) -> None:
                 created_by TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "ALTER TABLE oc_memory_decisions ADD COLUMN IF NOT EXISTS governance_refs JSONB NOT NULL DEFAULT '[]'::jsonb"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS oc_memory_decision_relationships (
+                relationship_id TEXT PRIMARY KEY,
+                from_decision_id TEXT NOT NULL REFERENCES oc_memory_decisions(decision_id),
+                relationship_type TEXT NOT NULL,
+                to_decision_id TEXT NOT NULL REFERENCES oc_memory_decisions(decision_id),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                created_by TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS oc_memory_decision_links (
+                link_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL REFERENCES oc_memory_decisions(decision_id),
+                link_type TEXT NOT NULL,
+                link_ref TEXT NOT NULL,
+                label TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
             """
         )
@@ -113,6 +159,7 @@ class DecisionCreate(BaseModel):
     rationale: str = ""
     alternatives_considered: list[dict[str, Any]] = Field(default_factory=list)
     affected_systems: list[str] = Field(default_factory=list)
+    governance_refs: list[dict[str, Any]] = Field(default_factory=list)
     status: str = "proposed"
     created_by: str = "unknown"
 
@@ -125,10 +172,46 @@ class DecisionOut(BaseModel):
     rationale: Optional[str] = None
     alternatives_considered: list[Any] = Field(default_factory=list)
     affected_systems: list[Any] = Field(default_factory=list)
+    governance_refs: list[Any] = Field(default_factory=list)
     status: str
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class StatusUpdate(BaseModel):
+    status: str
+    changed_by: str = "unknown"
+
+
+class RelationshipCreate(BaseModel):
+    relationship_type: str
+    to_decision_id: str
+    created_by: str = "unknown"
+
+
+class RelationshipOut(BaseModel):
+    relationship_id: str
+    from_decision_id: str
+    relationship_type: str
+    to_decision_id: str
+    created_at: datetime
+    created_by: Optional[str] = None
+
+
+class LinkCreate(BaseModel):
+    link_type: str
+    link_ref: str
+    label: str = ""
+
+
+class LinkOut(BaseModel):
+    link_id: str
+    decision_id: str
+    link_type: str
+    link_ref: str
+    label: Optional[str] = None
+    created_at: datetime
 
 
 class OutboxOut(BaseModel):
@@ -163,14 +246,15 @@ def create_decision(payload: DecisionCreate):
                     """
                     INSERT INTO oc_memory_decisions
                         (decision_id, title, context, decision, rationale,
-                         alternatives_considered, affected_systems, status, created_by)
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s)
+                         alternatives_considered, affected_systems, governance_refs, status, created_by)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s)
                     RETURNING *
                     """,
                     (
                         decision_id, payload.title, payload.context, payload.decision,
                         payload.rationale, json.dumps(payload.alternatives_considered),
-                        json.dumps(payload.affected_systems), payload.status, payload.created_by,
+                        json.dumps(payload.affected_systems), json.dumps(payload.governance_refs),
+                        payload.status, payload.created_by,
                     ),
                 )
                 row = cur.fetchone()
@@ -214,6 +298,162 @@ def get_decision(decision_id: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Get decision failed: {exc}")
+
+
+# ---------- lifecycle status transitions ----------
+
+@router.patch("/decisions/{decision_id}/status", response_model=DecisionOut)
+def update_decision_status(decision_id: str, payload: StatusUpdate):
+    if payload.status not in DECISION_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(DECISION_STATUSES)}")
+    try:
+        with get_conn() as conn:
+            ensure_memory_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT status FROM oc_memory_decisions WHERE decision_id = %s", (decision_id,))
+                existing = cur.fetchone()
+                if not existing:
+                    raise HTTPException(status_code=404, detail="Decision not found")
+
+                current_status = existing["status"]
+                allowed = DECISION_TRANSITIONS.get(current_status, set())
+                if payload.status not in allowed:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Invalid transition from '{current_status}' to '{payload.status}'. "
+                            f"Allowed next states: {sorted(allowed) or 'none (terminal state)'}"
+                        ),
+                    )
+
+                cur.execute(
+                    """
+                    UPDATE oc_memory_decisions
+                    SET status = %s, updated_at = now()
+                    WHERE decision_id = %s
+                    RETURNING *
+                    """,
+                    (payload.status, decision_id),
+                )
+                row = cur.fetchone()
+        return row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Update decision status failed: {exc}")
+
+
+# ---------- decision relationships ----------
+
+@router.post("/decisions/{decision_id}/relationships", response_model=RelationshipOut, status_code=201)
+def create_relationship(decision_id: str, payload: RelationshipCreate):
+    if payload.relationship_type not in RELATIONSHIP_TYPES:
+        raise HTTPException(status_code=400, detail=f"relationship_type must be one of {sorted(RELATIONSHIP_TYPES)}")
+    if payload.to_decision_id == decision_id:
+        raise HTTPException(status_code=400, detail="A decision cannot have a relationship to itself")
+    try:
+        with get_conn() as conn:
+            ensure_memory_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE decision_id = %s", (decision_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Decision not found")
+                cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE decision_id = %s", (payload.to_decision_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="to_decision_id not found")
+
+                relationship_id = new_id()
+                cur.execute(
+                    """
+                    INSERT INTO oc_memory_decision_relationships
+                        (relationship_id, from_decision_id, relationship_type, to_decision_id, created_by)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (relationship_id, decision_id, payload.relationship_type, payload.to_decision_id, payload.created_by),
+                )
+                row = cur.fetchone()
+        return row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Create relationship failed: {exc}")
+
+
+@router.get("/decisions/{decision_id}/relationships", response_model=list[RelationshipOut])
+def list_relationships(decision_id: str):
+    try:
+        with get_conn() as conn:
+            ensure_memory_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE decision_id = %s", (decision_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Decision not found")
+                cur.execute(
+                    """
+                    SELECT * FROM oc_memory_decision_relationships
+                    WHERE from_decision_id = %s OR to_decision_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (decision_id, decision_id),
+                )
+                return cur.fetchall()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"List relationships failed: {exc}")
+
+
+# ---------- decision links ----------
+
+@router.post("/decisions/{decision_id}/links", response_model=LinkOut, status_code=201)
+def create_link(decision_id: str, payload: LinkCreate):
+    if payload.link_type not in LINK_TYPES:
+        raise HTTPException(status_code=400, detail=f"link_type must be one of {sorted(LINK_TYPES)}")
+    try:
+        with get_conn() as conn:
+            ensure_memory_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE decision_id = %s", (decision_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Decision not found")
+
+                link_id = new_id()
+                cur.execute(
+                    """
+                    INSERT INTO oc_memory_decision_links
+                        (link_id, decision_id, link_type, link_ref, label)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (link_id, decision_id, payload.link_type, payload.link_ref, payload.label),
+                )
+                row = cur.fetchone()
+        return row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Create link failed: {exc}")
+
+
+@router.get("/decisions/{decision_id}/links", response_model=list[LinkOut])
+def list_links(decision_id: str):
+    try:
+        with get_conn() as conn:
+            ensure_memory_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT decision_id FROM oc_memory_decisions WHERE decision_id = %s", (decision_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Decision not found")
+                cur.execute(
+                    "SELECT * FROM oc_memory_decision_links WHERE decision_id = %s ORDER BY created_at DESC",
+                    (decision_id,),
+                )
+                return cur.fetchall()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"List links failed: {exc}")
 
 
 # ---------- best-effort Brain sync (never raises; missing endpoint = stay pending) ----------

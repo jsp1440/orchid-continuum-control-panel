@@ -37,13 +37,51 @@ for later synchronization once a Brain sync integration exists.
 
 No Brain credentials are hard-coded anywhere in this repo.
 
+### Decision lifecycle
+
+Decisions move through a small, explicit state machine - only the listed
+transitions are allowed; anything else is rejected with a 400 explaining the
+valid next states:
+
+```
+proposed ──► under_review ──► accepted ──► implemented ──┬──► deprecated
+    │                              │                        └──► superseded
+    └──────────────► rejected ◄────┘
+```
+
+`deprecated` and `accepted` may also go directly to `superseded`.
+`superseded` and `rejected` are terminal.
+
+### Relationships and links
+
+Decisions can be connected to each other and to external artifacts:
+
+- **`oc_memory_decision_relationships`** - typed edges between decisions
+  (`supersedes`, `parent_of`, `conflicts_with`, `related_to`). Stored once,
+  in one direction; the reverse view is a query, not a duplicated column.
+- **`oc_memory_decision_links`** - references from a decision to external
+  artifacts (`task`, `finding`, `commit`, `pull_request`, `release`,
+  `document`, `external_url`).
+
+Decisions also carry a `governance_refs` field (a plain JSON array) for
+citing standards or policy - it's an unvalidated placeholder today, since
+there is no Governance/Constitution engine yet, and costs nothing to carry
+forward.
+
 ### API
 
 ```
 POST   /api/v1/memory/decisions
 GET    /api/v1/memory/decisions
 GET    /api/v1/memory/decisions/{decision_id}
+PATCH  /api/v1/memory/decisions/{decision_id}/status
 POST   /api/v1/memory/decisions/{decision_id}/queue-brain-sync
+
+POST   /api/v1/memory/decisions/{decision_id}/relationships
+GET    /api/v1/memory/decisions/{decision_id}/relationships
+POST   /api/v1/memory/decisions/{decision_id}/links
+GET    /api/v1/memory/decisions/{decision_id}/links
+
 GET    /api/v1/memory/outbox
 POST   /api/v1/memory/outbox/{outbox_id}/mark-sent
 POST   /api/v1/memory/outbox/{outbox_id}/mark-confirmed
@@ -51,5 +89,6 @@ POST   /api/v1/memory/outbox/{outbox_id}/mark-failed
 ```
 
 A minimal UI is served at `/engineering-memory.html` showing recent
-decisions, pending/failed/confirmed Brain sync status, and a form to record
-a new decision.
+decisions with their lifecycle status (changeable inline), an expandable
+details panel per decision for relationships and links, and
+pending/failed/confirmed Brain sync status.

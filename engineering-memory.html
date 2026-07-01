@@ -32,14 +32,21 @@
     .card-title{font-weight:700;margin-bottom:4px}
     .card-meta{font-size:12px;color:var(--muted);line-height:1.5}
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-right:6px}
-    .badge.proposed,.badge.pending{background:#2a3755;color:var(--text)}
-    .badge.accepted,.badge.sent,.badge.confirmed{background:var(--ok);color:#04261a}
+    .badge.proposed,.badge.pending,.badge.under_review{background:#2a3755;color:var(--text)}
+    .badge.accepted,.badge.sent,.badge.confirmed,.badge.implemented{background:var(--ok);color:#04261a}
     .badge.rejected,.badge.failed{background:var(--err);color:#3a0a10}
-    .badge.superseded{background:var(--warn);color:#3a2a04}
+    .badge.superseded,.badge.deprecated{background:var(--warn);color:#3a2a04}
     .empty{color:var(--muted);font-size:13px}
     .msg{margin-top:10px;font-size:13px}
     .msg.error{color:var(--err)}
     .msg.ok{color:var(--ok)}
+    select{padding:8px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    .details{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:none}
+    .details.open{display:block}
+    .subhead{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 0 6px}
+    .mini-form{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+    .mini-form input,.mini-form select{width:auto;flex:1;min-width:120px;padding:8px}
   </style>
 </head>
 <body>
@@ -89,7 +96,12 @@
 
 <script>
 (function(){
+  var STATUSES = ['proposed','under_review','accepted','implemented','deprecated','superseded','rejected'];
+  var RELATIONSHIP_TYPES = ['supersedes','parent_of','conflicts_with','related_to'];
+  var LINK_TYPES = ['task','finding','commit','pull_request','release','document','external_url'];
+
   function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function opts(list, selected){return list.map(function(v){return '<option value="'+esc(v)+'"'+(v===selected?' selected':'')+'>'+esc(v)+'</option>'}).join('')}
   async function api(path, opts){
     var res = await fetch(path, opts || {});
     var text = await res.text();
@@ -105,13 +117,36 @@
       var rows = await api('/api/v1/memory/decisions?limit=20');
       if (!rows.length) { el.innerHTML = '<div class="empty">No decisions recorded yet.</div>'; return; }
       el.innerHTML = rows.map(function(d){
-        return '<div class="card">' +
+        return '<div class="card" data-decision-card="' + esc(d.decision_id) + '">' +
           '<div class="card-title">' + esc(d.title) + ' <span class="badge ' + esc(d.status) + '">' + esc(d.status) + '</span></div>' +
           '<div class="card-meta">' + esc(d.decision) + '</div>' +
           '<div class="card-meta">by ' + esc(d.created_by) + ' &middot; ' + esc(d.created_at) + '</div>' +
-          '<button class="small" data-queue="' + esc(d.decision_id) + '" style="margin-top:8px">Queue Brain Sync</button>' +
+          '<div class="row">' +
+            '<select data-status-select="' + esc(d.decision_id) + '">' + opts(STATUSES, d.status) + '</select>' +
+            '<button class="small" data-change-status="' + esc(d.decision_id) + '">Change Status</button>' +
+            '<button class="small" data-queue="' + esc(d.decision_id) + '">Queue Brain Sync</button>' +
+            '<button class="small" data-toggle-details="' + esc(d.decision_id) + '">Details</button>' +
+          '</div>' +
+          '<div class="details" id="details-' + esc(d.decision_id) + '">' +
+            '<div class="subhead">Relationships</div>' +
+            '<div id="rel-list-' + esc(d.decision_id) + '" class="empty">Not loaded.</div>' +
+            '<div class="mini-form">' +
+              '<select id="rel-type-' + esc(d.decision_id) + '">' + opts(RELATIONSHIP_TYPES) + '</select>' +
+              '<input id="rel-to-' + esc(d.decision_id) + '" type="text" placeholder="to_decision_id">' +
+              '<button class="small" data-add-relationship="' + esc(d.decision_id) + '">Add</button>' +
+            '</div>' +
+            '<div class="subhead">Links</div>' +
+            '<div id="link-list-' + esc(d.decision_id) + '" class="empty">Not loaded.</div>' +
+            '<div class="mini-form">' +
+              '<select id="link-type-' + esc(d.decision_id) + '">' + opts(LINK_TYPES) + '</select>' +
+              '<input id="link-ref-' + esc(d.decision_id) + '" type="text" placeholder="reference (id/URL)">' +
+              '<input id="link-label-' + esc(d.decision_id) + '" type="text" placeholder="label (optional)">' +
+              '<button class="small" data-add-link="' + esc(d.decision_id) + '">Add</button>' +
+            '</div>' +
+          '</div>' +
           '</div>';
       }).join('');
+
       el.querySelectorAll('[data-queue]').forEach(function(btn){
         btn.addEventListener('click', async function(){
           btn.disabled = true;
@@ -122,7 +157,91 @@
           btn.disabled = false;
         });
       });
+
+      el.querySelectorAll('[data-change-status]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          var id = btn.getAttribute('data-change-status');
+          var select = document.querySelector('[data-status-select="' + id + '"]');
+          btn.disabled = true;
+          try {
+            await api('/api/v1/memory/decisions/' + id + '/status', {
+              method: 'PATCH', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({status: select.value})
+            });
+            await loadDecisions();
+          } catch(e) { alert('Status change failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
+
+      el.querySelectorAll('[data-toggle-details]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var id = btn.getAttribute('data-toggle-details');
+          var panel = document.getElementById('details-' + id);
+          var opening = !panel.classList.contains('open');
+          panel.classList.toggle('open');
+          if (opening) loadDecisionDetails(id);
+        });
+      });
+
+      el.querySelectorAll('[data-add-relationship]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          var id = btn.getAttribute('data-add-relationship');
+          var type = document.getElementById('rel-type-' + id).value;
+          var to = document.getElementById('rel-to-' + id).value.trim();
+          if (!to) { alert('to_decision_id is required'); return; }
+          btn.disabled = true;
+          try {
+            await api('/api/v1/memory/decisions/' + id + '/relationships', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({relationship_type: type, to_decision_id: to})
+            });
+            document.getElementById('rel-to-' + id).value = '';
+            await loadDecisionDetails(id);
+          } catch(e) { alert('Add relationship failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
+
+      el.querySelectorAll('[data-add-link]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          var id = btn.getAttribute('data-add-link');
+          var type = document.getElementById('link-type-' + id).value;
+          var ref = document.getElementById('link-ref-' + id).value.trim();
+          var label = document.getElementById('link-label-' + id).value.trim();
+          if (!ref) { alert('reference is required'); return; }
+          btn.disabled = true;
+          try {
+            await api('/api/v1/memory/decisions/' + id + '/links', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({link_type: type, link_ref: ref, label: label})
+            });
+            document.getElementById('link-ref-' + id).value = '';
+            document.getElementById('link-label-' + id).value = '';
+            await loadDecisionDetails(id);
+          } catch(e) { alert('Add link failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
     } catch(e) { el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
+  }
+
+  async function loadDecisionDetails(decisionId){
+    var relEl = document.getElementById('rel-list-' + decisionId);
+    var linkEl = document.getElementById('link-list-' + decisionId);
+    try {
+      var rels = await api('/api/v1/memory/decisions/' + decisionId + '/relationships');
+      relEl.innerHTML = rels.length ? rels.map(function(r){
+        var direction = r.from_decision_id === decisionId ? (r.relationship_type + ' -> ' + r.to_decision_id) : (r.relationship_type + ' <- ' + r.from_decision_id);
+        return '<div class="card-meta">' + esc(direction) + '</div>';
+      }).join('') : '<div class="empty">No relationships.</div>';
+    } catch(e) { relEl.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
+    try {
+      var links = await api('/api/v1/memory/decisions/' + decisionId + '/links');
+      linkEl.innerHTML = links.length ? links.map(function(l){
+        return '<div class="card-meta">[' + esc(l.link_type) + '] ' + esc(l.link_ref) + (l.label ? ' - ' + esc(l.label) : '') + '</div>';
+      }).join('') : '<div class="empty">No links.</div>';
+    } catch(e) { linkEl.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
   }
 
   function renderOutbox(el, rows, emptyText){
