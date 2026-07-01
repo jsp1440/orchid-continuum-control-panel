@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from psycopg.rows import dict_row
 
+from memory import router as memory_router
+
 APP_TITLE = "Orchid Continuum API"
 APP_VERSION = "1.11"
 
@@ -25,6 +27,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(memory_router)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -450,6 +453,14 @@ def audit_status():
 @app.get("/atlas.html")
 def serve_atlas_html():
     return FileResponse(find_atlas_html(), media_type="text/html")
+
+
+@app.get("/engineering-memory.html")
+def serve_engineering_memory_html():
+    path = Path(__file__).resolve().parent / "engineering-memory.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="engineering-memory.html not found")
+    return FileResponse(path, media_type="text/html")
 
 
 @app.get("/api/genus/daily")

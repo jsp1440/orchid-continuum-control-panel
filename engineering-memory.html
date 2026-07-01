@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - Engineering Memory</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1200px;margin:0 auto;padding:28px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+    .topbar h1{margin:0;font-size:30px}
+    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .panel h2{margin:0 0 14px;font-size:20px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .field{grid-column:span 2}
+    .field.half{grid-column:span 1}
+    label{display:block;margin-bottom:6px;font-size:13px;color:var(--muted)}
+    input,textarea{width:100%;padding:10px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit}
+    textarea{min-height:60px;resize:vertical}
+    button{margin-top:12px;padding:10px 16px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}
+    button.small{margin-top:0;padding:6px 10px;font-size:12px}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    @media(max-width:900px){.cols{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px}
+    .card-title{font-weight:700;margin-bottom:4px}
+    .card-meta{font-size:12px;color:var(--muted);line-height:1.5}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-right:6px}
+    .badge.proposed,.badge.pending{background:#2a3755;color:var(--text)}
+    .badge.accepted,.badge.sent,.badge.confirmed{background:var(--ok);color:#04261a}
+    .badge.rejected,.badge.failed{background:var(--err);color:#3a0a10}
+    .badge.superseded{background:var(--warn);color:#3a2a04}
+    .empty{color:var(--muted);font-size:13px}
+    .msg{margin-top:10px;font-size:13px}
+    .msg.error{color:var(--err)}
+    .msg.ok{color:var(--ok)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Engineering Memory / Brain Outbox</h1>
+      <a class="back-link" href="/index.html">Back to Gallery</a>
+    </div>
+
+    <div class="panel">
+      <h2>Record a Decision</h2>
+      <div class="form-grid">
+        <div class="field"><label for="fTitle">Title</label><input id="fTitle" type="text" placeholder="Short decision title"></div>
+        <div class="field"><label for="fContext">Context</label><textarea id="fContext" placeholder="What situation prompted this?"></textarea></div>
+        <div class="field"><label for="fDecision">Decision</label><textarea id="fDecision" placeholder="What was decided"></textarea></div>
+        <div class="field"><label for="fRationale">Rationale</label><textarea id="fRationale" placeholder="Why"></textarea></div>
+        <div class="field half"><label for="fAffected">Affected systems (comma separated)</label><input id="fAffected" type="text" placeholder="control-panel, brain"></div>
+        <div class="field half"><label for="fCreatedBy">Created by</label><input id="fCreatedBy" type="text" placeholder="your name"></div>
+      </div>
+      <button id="submitBtn" type="button">Save Decision</button>
+      <div id="formMsg" class="msg"></div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">Recent Decisions</h2>
+        <button class="small" id="refreshBtn" type="button">Refresh</button>
+      </div>
+      <div id="decisionsList"><div class="empty">Loading...</div></div>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h2>Pending Brain Sync</h2>
+        <div id="pendingList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Failed Syncs</h2>
+        <div id="failedList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Sent / Confirmed</h2>
+        <div id="confirmedList"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  async function api(path, opts){
+    var res = await fetch(path, opts || {});
+    var text = await res.text();
+    var data;
+    try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
+    if (!res.ok) throw new Error((data && data.detail) ? data.detail : ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function loadDecisions(){
+    var el = document.getElementById('decisionsList');
+    try {
+      var rows = await api('/api/v1/memory/decisions?limit=20');
+      if (!rows.length) { el.innerHTML = '<div class="empty">No decisions recorded yet.</div>'; return; }
+      el.innerHTML = rows.map(function(d){
+        return '<div class="card">' +
+          '<div class="card-title">' + esc(d.title) + ' <span class="badge ' + esc(d.status) + '">' + esc(d.status) + '</span></div>' +
+          '<div class="card-meta">' + esc(d.decision) + '</div>' +
+          '<div class="card-meta">by ' + esc(d.created_by) + ' &middot; ' + esc(d.created_at) + '</div>' +
+          '<button class="small" data-queue="' + esc(d.decision_id) + '" style="margin-top:8px">Queue Brain Sync</button>' +
+          '</div>';
+      }).join('');
+      el.querySelectorAll('[data-queue]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          btn.disabled = true;
+          try {
+            await api('/api/v1/memory/decisions/' + btn.getAttribute('data-queue') + '/queue-brain-sync', {method:'POST'});
+            await loadOutbox();
+          } catch(e) { alert('Queue failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
+    } catch(e) { el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
+  }
+
+  function renderOutbox(el, rows, emptyText){
+    if (!rows.length) { el.innerHTML = '<div class="empty">' + emptyText + '</div>'; return; }
+    el.innerHTML = rows.map(function(o){
+      return '<div class="card">' +
+        '<div class="card-title"><span class="badge ' + esc(o.sync_status) + '">' + esc(o.sync_status) + '</span> ' + esc((o.payload_json && o.payload_json.title) || o.outbox_id) + '</div>' +
+        '<div class="card-meta">attempts: ' + esc(o.attempts) + ' &middot; last attempt: ' + esc(o.last_attempt_at || 'never') + '</div>' +
+        (o.last_error ? '<div class="card-meta">error: ' + esc(o.last_error) + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  async function loadOutbox(){
+    try {
+      var all = await api('/api/v1/memory/outbox?limit=100');
+      renderOutbox(document.getElementById('pendingList'), all.filter(function(o){return o.sync_status==='pending'}), 'Nothing pending.');
+      renderOutbox(document.getElementById('failedList'), all.filter(function(o){return o.sync_status==='failed'}), 'No failures.');
+      renderOutbox(document.getElementById('confirmedList'), all.filter(function(o){return o.sync_status==='sent'||o.sync_status==='confirmed'}), 'Nothing sent yet.');
+    } catch(e) {
+      ['pendingList','failedList','confirmedList'].forEach(function(id){
+        document.getElementById(id).innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+      });
+    }
+  }
+
+  async function submitDecision(){
+    var msg = document.getElementById('formMsg');
+    msg.textContent = ''; msg.className = 'msg';
+    var title = document.getElementById('fTitle').value.trim();
+    var decision = document.getElementById('fDecision').value.trim();
+    if (!title || !decision) { msg.textContent = 'Title and Decision are required.'; msg.className = 'msg error'; return; }
+    var affected = document.getElementById('fAffected').value.split(',').map(function(s){return s.trim()}).filter(Boolean);
+    var body = {
+      title: title,
+      context: document.getElementById('fContext').value.trim(),
+      decision: decision,
+      rationale: document.getElementById('fRationale').value.trim(),
+      affected_systems: affected,
+      created_by: document.getElementById('fCreatedBy').value.trim() || 'unknown'
+    };
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    try {
+      await api('/api/v1/memory/decisions', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      msg.textContent = 'Saved.'; msg.className = 'msg ok';
+      ['fTitle','fContext','fDecision','fRationale','fAffected','fCreatedBy'].forEach(function(id){document.getElementById(id).value=''});
+      await loadDecisions();
+    } catch(e) {
+      msg.textContent = 'Save failed: ' + e.message; msg.className = 'msg error';
+    }
+    btn.disabled = false;
+  }
+
+  document.getElementById('submitBtn').addEventListener('click', submitDecision);
+  document.getElementById('refreshBtn').addEventListener('click', function(){ loadDecisions(); loadOutbox(); });
+
+  loadDecisions();
+  loadOutbox();
+})();
+</script>
+</body>
+</html>
