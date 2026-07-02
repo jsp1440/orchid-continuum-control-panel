@@ -1,0 +1,52 @@
+{
+  "domain": "Research Intelligence & Innovation Management",
+  "status": "repository_scaffold_created",
+  "principle": "Everything that contributes to scientific discovery is represented as a provenance-rich research object connected within a unified knowledge graph.",
+  "oci_records": [
+    {
+      "oci_id": "OCI-0001",
+      "title": "Research Intelligence & Innovation Management",
+      "type": "top_level_architectural_domain",
+      "status": "concept_scaffolded",
+      "description": "Top-level Brain domain for managing scientific innovation, publication opportunities, grant relevance, evidence validation, and innovation provenance."
+    },
+    {
+      "oci_id": "OCI-0002",
+      "title": "Evidence Validation & AI Benchmarking Framework",
+      "aliases": ["EVAB", "OCAB", "Orchid Continuum AI Benchmark"],
+      "type": "evidence_validation_and_ai_benchmarking_framework",
+      "status": "concept_scaffolded",
+      "description": "Framework for validating claims against curated evidence, benchmarking AI research tools, detecting hallucinated citations, measuring uncertainty calibration, and surfacing knowledge gaps."
+    },
+    {
+      "oci_id": "OCI-0003",
+      "title": "Innovation Provenance & Research Lifecycle",
+      "aliases": ["IPRL"],
+      "type": "innovation_lifecycle_system",
+      "status": "concept_scaffolded",
+      "description": "Lifecycle record for every major innovation from inception through implementation, literature support, validation, publications, grants, and downstream derivatives."
+    },
+    {
+      "oci_id": "OCI-0004",
+      "title": "Publication Opportunities Register",
+      "aliases": ["POR"],
+      "type": "publication_pipeline",
+      "status": "concept_scaffolded",
+      "description": "Persistent register of methods, datasets, analyses, frameworks, and other outputs that may be publishable."
+    },
+    {
+      "oci_id": "OCI-0005",
+      "title": "Conversation Innovation Auditor",
+      "type": "conversation_audit_process",
+      "status": "concept_scaffolded",
+      "description": "End-of-session audit process that checks for missed innovations, architectural decisions, literature needs, publication opportunities, grant relevance, and Brain updates."
+    },
+    {
+      "oci_id": "OCI-0006",
+      "title": "Innovation-as-First-Class Research Object Architecture",
+      "type": "foundational_design_principle",
+      "status": "concept_scaffolded",
+      "description": "Design principle that innovations, not only papers or code modules, are canonical research entities with provenance, relationships, evidence, and downstream impact."
+    }
+  ]
+}
