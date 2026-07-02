@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - Calyx</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1100px;margin:0 auto;padding:28px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+    .topbar h1{margin:0;font-size:30px}
+    .subtitle{color:var(--muted);font-size:14px;margin:8px 0 22px}
+    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .panel h2{margin:0 0 12px;font-size:19px}
+    .counts-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:22px}
+    @media(max-width:900px){.counts-strip{grid-template-columns:repeat(3,1fr)}}
+    .count-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}
+    .count-value{font-size:22px;font-weight:800}
+    .count-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media(max-width:800px){.cols{grid-template-columns:1fr}}
+    .item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;font-size:13px}
+    .item-summary{margin-bottom:2px}
+    .item-meta{color:var(--muted);font-size:11px}
+    .empty{color:var(--muted);font-size:13px}
+    .next-action{background:var(--card);border:1px solid var(--blue);border-radius:12px;padding:14px}
+    .next-action-summary{font-weight:700;margin-bottom:6px}
+    .next-action-meta{color:var(--muted);font-size:12px}
+    textarea,input{width:100%;padding:10px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit}
+    button{margin-top:10px;padding:10px 16px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .answer{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px;white-space:pre-wrap;line-height:1.6}
+    .example-qs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .example-qs button{margin-top:0;padding:6px 10px;font-size:12px;background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+    .scores-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+    @media(max-width:800px){.scores-strip{grid-template-columns:repeat(2,1fr)}}
+    .score-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
+    .score-value{font-size:26px;font-weight:800}
+    .score-value.null{color:var(--muted);font-size:16px}
+    .score-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+    .score-note{font-size:10px;color:var(--muted);margin-top:4px}
+    .priority-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;font-size:13px}
+    .priority-rank{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:12px;margin-right:6px}
+    .priority-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-left:6px}
+    .priority-badge.critical{background:var(--err);color:#3a0a10}
+    .priority-badge.high{background:var(--warn);color:#3a2a04}
+    .priority-badge.medium,.priority-badge.low{background:#2a3755;color:var(--text)}
+    .priority-meta{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.6}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Calyx</h1>
+      <a class="back-link" id="backLink" href="/admin.html">Back to Mission Control</a>
+    </div>
+    <div class="subtitle">Mission Control is Calyx's workspace. Phase Alpha: read-only observation, analysis, and recommendation - no automatic execution, deployment, or self-approval.</div>
+
+    <div id="countsStrip" class="counts-strip"></div>
+    <div id="scoresStrip" class="scores-strip"></div>
+
+    <div class="panel">
+      <h2>Priorities</h2>
+      <button id="evaluateBtn" type="button">Evaluate Now</button>
+      <div id="evaluateMsg" class="msg"></div>
+      <div id="prioritiesList" style="margin-top:12px"><div class="empty">Click "Evaluate Now" to rank current priorities.</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Ask Calyx</h2>
+      <textarea id="questionInput" rows="2" placeholder="What should we work on today?"></textarea>
+      <div class="example-qs">
+        <button type="button" data-q="What should we work on today?">Work on today?</button>
+        <button type="button" data-q="What is blocking progress?">Blocking?</button>
+        <button type="button" data-q="What changed since yesterday?">Changed?</button>
+        <button type="button" data-q="What engineering decisions are still unresolved?">Unresolved decisions?</button>
+        <button type="button" data-q="What systems are unhealthy?">Unhealthy?</button>
+        <button type="button" data-q="What is closest to completion?">Closest to completion?</button>
+      </div>
+      <button id="askBtn" type="button">Ask</button>
+      <div id="answerBox" class="answer" style="display:none"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Next Action</h2>
+      <div id="nextAction"><div class="empty">Loading...</div></div>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h2>Healthy</h2>
+        <div id="healthyList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Broken</h2>
+        <div id="brokenList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Blocked</h2>
+        <div id="blockedList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Waiting for Review</h2>
+        <div id="reviewList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Closest to Completion</h2>
+        <div id="closestList"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Recent Changes (24h)</h2>
+        <div id="recentList"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+  var ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+  (function(){
+    var backLink = document.getElementById('backLink');
+    if (backLink && ADMIN_TOKEN) {
+      var url = new URL(backLink.href, window.location.origin);
+      url.searchParams.set('token', ADMIN_TOKEN);
+      backLink.href = url.pathname + url.search;
+    }
+  })();
+
+  async function api(path, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {}, ADMIN_TOKEN ? {'Authorization': 'Bearer ' + ADMIN_TOKEN} : {});
+    var res = await fetch(path, opts);
+    var text = await res.text();
+    var data;
+    try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
+    if (!res.ok) throw new Error((data && data.detail) ? data.detail : ('HTTP ' + res.status));
+    return data;
+  }
+
+  function renderList(el, items, formatter){
+    if (!items || !items.length) { el.innerHTML = '<div class="empty">None.</div>'; return; }
+    el.innerHTML = items.map(formatter).join('');
+  }
+
+  function itemHtml(i){
+    return '<div class="item"><div class="item-summary">' + esc(i.summary) + '</div>' +
+      '<div class="item-meta">' + esc(i.type) + ':' + esc(i.id) + (i.status ? ' &middot; ' + esc(i.status) : '') + '</div></div>';
+  }
+
+  function renderScores(domainScores){
+    var order = ['engineering', 'scientific', 'mission_progress', 'collaboration'];
+    document.getElementById('scoresStrip').innerHTML = order.map(function(key){
+      var d = domainScores[key];
+      var valueHtml = (d.score === null || d.score === undefined)
+        ? '<div class="score-value null">No data</div>'
+        : '<div class="score-value">' + esc(d.score) + '</div>';
+      return '<div class="score-box">' + valueHtml +
+        '<div class="score-label">' + esc(d.label) + '</div>' +
+        '<div class="score-note">' + esc(d.data_coverage.not_yet_monitored.length) + ' signal type(s) not yet monitored</div></div>';
+    }).join('');
+  }
+
+  function renderPriorities(priorities){
+    var el = document.getElementById('prioritiesList');
+    if (!priorities.length) { el.innerHTML = '<div class="empty">No priorities - all tracked signals are currently clear.</div>'; return; }
+    el.innerHTML = priorities.map(function(p){
+      return '<div class="priority-item">' +
+        '<span class="priority-rank">' + esc(p.rank) + '</span>' +
+        '<strong>' + esc(p.domain) + '</strong>' +
+        '<span class="priority-badge ' + esc(p.priority) + '">' + esc(p.priority) + '</span>' +
+        '<div style="margin-top:6px">' + esc(p.reason) + '</div>' +
+        '<div class="priority-meta">' +
+          'Impact: ' + esc(p.expected_impact) + '<br>' +
+          'Agent: ' + esc(p.suggested_agent || 'none - human review') +
+          ' &middot; Tool: ' + esc(p.suggested_tool || 'none - human judgment') +
+          ' &middot; Confidence: ' + esc(p.confidence) + '<br>' +
+          'Dependencies: ' + esc(p.dependencies.length ? p.dependencies.join(', ') : 'none identified') +
+          ' &middot; Evidence: ' + esc(p.evidence.type) + ':' + esc(p.evidence.id) +
+        '</div></div>';
+    }).join('');
+  }
+
+  async function loadBrief(){
+    try {
+      var brief = await api('/api/v1/calyx/mission-brief');
+
+      var c = brief.counts;
+      document.getElementById('countsStrip').innerHTML = [
+        ['Decisions', c.decisions_total],
+        ['Under Review', c.decisions_under_review],
+        ['Findings Open', c.findings_open],
+        ['Critical', c.findings_critical],
+        ['Failed Tasks', c.tasks_failed],
+        ['Agents', c.agents_enabled + '/' + c.agents_total]
+      ].map(function(pair){
+        return '<div class="count-box"><div class="count-value">' + esc(pair[1]) + '</div><div class="count-label">' + esc(pair[0]) + '</div></div>';
+      }).join('');
+
+      renderScores(brief.domain_scores);
+      renderPriorities(brief.priorities);
+
+      var na = brief.next_action;
+      document.getElementById('nextAction').innerHTML =
+        '<div class="next-action"><div class="next-action-summary">' + esc(na.summary) + '</div>' +
+        '<div class="next-action-meta">' + (na.assigned_agent ? 'Agent: ' + esc(na.assigned_agent) : 'Requires human review - no agent assigned') +
+        ' &middot; ' + esc(na.reason) + '</div></div>';
+
+      renderList(document.getElementById('healthyList'), brief.healthy.map(function(s){return {summary:s,type:'ok',id:''}}),
+        function(i){ return '<div class="item"><div class="item-summary">' + esc(i.summary) + '</div></div>'; });
+      renderList(document.getElementById('brokenList'), brief.broken, itemHtml);
+      renderList(document.getElementById('blockedList'), brief.blocked, itemHtml);
+      renderList(document.getElementById('reviewList'), brief.waiting_for_review, itemHtml);
+      renderList(document.getElementById('closestList'), brief.closest_to_completion, itemHtml);
+      renderList(document.getElementById('recentList'), brief.recent_changes, itemHtml);
+    } catch(e) {
+      document.getElementById('nextAction').innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function askQuestion(question){
+    var box = document.getElementById('answerBox');
+    var btn = document.getElementById('askBtn');
+    btn.disabled = true;
+    box.style.display = 'block';
+    box.textContent = 'Thinking...';
+    try {
+      var res = await api('/api/v1/calyx/ask', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({question: question})
+      });
+      box.textContent = res.answer;
+    } catch(e) {
+      box.textContent = 'Failed: ' + e.message;
+    }
+    btn.disabled = false;
+  }
+
+  document.getElementById('askBtn').addEventListener('click', function(){
+    var q = document.getElementById('questionInput').value.trim();
+    if (q) askQuestion(q);
+  });
+  document.querySelectorAll('[data-q]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var q = btn.getAttribute('data-q');
+      document.getElementById('questionInput').value = q;
+      askQuestion(q);
+    });
+  });
+
+  document.getElementById('evaluateBtn').addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('evaluateMsg');
+    btn.disabled = true;
+    msg.textContent = 'Evaluating...'; msg.className = 'msg';
+    try {
+      var result = await api('/api/v1/calyx/evaluate', {method: 'POST'});
+      renderScores(result.domain_scores);
+      renderPriorities(result.priorities);
+      var created = result.proposed_decisions_created.length;
+      msg.textContent = created
+        ? created + ' new Engineering Memory decision(s) proposed for review (' + result.proposed_decisions_skipped_existing + ' already existed).'
+        : 'No new decisions proposed (' + result.proposed_decisions_skipped_existing + ' already existed for current top items).';
+      msg.className = 'msg ok';
+    } catch(e) {
+      msg.textContent = 'Evaluate failed: ' + e.message; msg.className = 'msg error';
+    }
+    btn.disabled = false;
+  });
+
+  loadBrief();
+})();
+</script>
+</body>
+</html>

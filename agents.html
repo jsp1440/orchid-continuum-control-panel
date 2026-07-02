@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - AI Agents</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1000px;margin:0 auto;padding:28px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+    .topbar h1{margin:0;font-size:30px}
+    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .panel h2{margin:0 0 14px;font-size:20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px}
+    .card-title{font-weight:700;margin-bottom:4px}
+    .card-meta{font-size:12px;color:var(--muted);line-height:1.5}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-right:6px}
+    .badge.active,.badge.done,.badge.resolved{background:var(--ok);color:#04261a}
+    .badge.failed,.badge.critical{background:var(--err);color:#3a0a10}
+    .badge.warning,.badge.running,.badge.pending{background:var(--warn);color:#3a2a04}
+    .badge.open,.badge.acknowledged,.badge.info{background:#2a3755;color:var(--text)}
+    button{padding:8px 14px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer;font-size:13px}
+    button.small{padding:6px 10px;font-size:12px}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .empty{color:var(--muted);font-size:13px}
+    .msg{margin-top:10px;font-size:13px}
+    .msg.error{color:var(--err)}
+    .msg.ok{color:var(--ok)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>AI Agents</h1>
+      <a class="back-link" id="backLink" href="/admin.html">Back to Mission Control</a>
+    </div>
+
+    <div id="agentsList"><div class="empty">Loading...</div></div>
+  </div>
+
+<script>
+(function(){
+  function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+  var ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+  (function(){
+    var backLink = document.getElementById('backLink');
+    if (backLink && ADMIN_TOKEN) {
+      var url = new URL(backLink.href, window.location.origin);
+      url.searchParams.set('token', ADMIN_TOKEN);
+      backLink.href = url.pathname + url.search;
+    }
+  })();
+
+  async function api(path, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {}, ADMIN_TOKEN ? {'Authorization': 'Bearer ' + ADMIN_TOKEN} : {});
+    var res = await fetch(path, opts);
+    var text = await res.text();
+    var data;
+    try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
+    if (!res.ok) throw new Error((data && data.detail) ? data.detail : ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function loadAgents(){
+    var el = document.getElementById('agentsList');
+    try {
+      var agents = await api('/api/v1/agents');
+      if (!agents.length) { el.innerHTML = '<div class="empty">No agents registered yet.</div>'; return; }
+      el.innerHTML = agents.map(function(a){
+        var lastTask = a.last_task;
+        var lastRunHtml = lastTask
+          ? '<span class="badge ' + esc(lastTask.status) + '">' + esc(lastTask.status) + '</span> ' + esc(lastTask.created_at)
+          : 'never run';
+        return '<div class="panel" data-agent-panel="' + esc(a.agent_key) + '">' +
+          '<h2>' + esc(a.name) + ' <span class="badge ' + esc(a.lifecycle_state) + '">' + esc(a.lifecycle_state) + '</span></h2>' +
+          '<div class="card-meta">' + esc(a.purpose || '') + '</div>' +
+          '<div class="card-meta" style="margin-top:8px">Last run: ' + lastRunHtml + '</div>' +
+          (lastTask && lastTask.result_summary ? '<div class="card-meta">Result: ' + esc(lastTask.result_summary) + '</div>' : '') +
+          (lastTask && lastTask.last_error ? '<div class="card-meta">Error: ' + esc(lastTask.last_error) + '</div>' : '') +
+          '<div class="row">' +
+            '<button data-run="' + esc(a.agent_key) + '">Run Now</button>' +
+          '</div>' +
+          '<div id="msg-' + esc(a.agent_key) + '" class="msg"></div>' +
+          '<h2 style="margin-top:18px">Findings</h2>' +
+          '<div id="findings-' + esc(a.agent_key) + '"><div class="empty">Loading...</div></div>' +
+          '</div>';
+      }).join('');
+
+      el.querySelectorAll('[data-run]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          var key = btn.getAttribute('data-run');
+          var msg = document.getElementById('msg-' + key);
+          btn.disabled = true;
+          msg.textContent = 'Running...'; msg.className = 'msg';
+          try {
+            await api('/api/v1/agents/' + key + '/run', {method: 'POST'});
+            msg.textContent = 'Run complete.'; msg.className = 'msg ok';
+            await loadAgents();
+          } catch(e) {
+            msg.textContent = 'Run failed: ' + e.message; msg.className = 'msg error';
+          }
+          btn.disabled = false;
+        });
+      });
+
+      agents.forEach(function(a){ loadFindings(a.agent_key); });
+    } catch(e) { el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
+  }
+
+  async function loadFindings(agentKey){
+    var el = document.getElementById('findings-' + agentKey);
+    try {
+      var findings = await api('/api/v1/agents/' + agentKey + '/findings');
+      if (!findings.length) { el.innerHTML = '<div class="empty">No findings yet.</div>'; return; }
+      el.innerHTML = findings.map(function(f){
+        return '<div class="card">' +
+          '<div class="card-title"><span class="badge ' + esc(f.status) + '">' + esc(f.status) + '</span> ' +
+            '<span class="badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span> ' + esc(f.finding_type) + '</div>' +
+          '<div class="card-meta">' + esc(f.summary) + '</div>' +
+          '<div class="card-meta">subject: ' + esc(f.subject_type) + ' ' + esc(f.subject_id) + ' &middot; ' + esc(f.created_at) + '</div>' +
+          (f.status === 'open' ? (
+            '<div class="row">' +
+              '<button class="small" data-ack="' + esc(f.finding_id) + '">Acknowledge</button>' +
+              '<button class="small" data-resolve="' + esc(f.finding_id) + '">Resolve</button>' +
+            '</div>'
+          ) : '') +
+          '</div>';
+      }).join('');
+
+      el.querySelectorAll('[data-ack]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          btn.disabled = true;
+          try {
+            await api('/api/v1/agents/findings/' + btn.getAttribute('data-ack'), {
+              method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status:'acknowledged'})
+            });
+            await loadFindings(agentKey);
+          } catch(e) { alert('Acknowledge failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
+      el.querySelectorAll('[data-resolve]').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          btn.disabled = true;
+          try {
+            await api('/api/v1/agents/findings/' + btn.getAttribute('data-resolve'), {
+              method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status:'resolved'})
+            });
+            await loadFindings(agentKey);
+          } catch(e) { alert('Resolve failed: ' + e.message); }
+          btn.disabled = false;
+        });
+      });
+    } catch(e) { el.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>'; }
+  }
+
+  loadAgents();
+})();
+</script>
+</body>
+</html>
