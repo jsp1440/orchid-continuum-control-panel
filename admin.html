@@ -16,12 +16,18 @@
     .topbar h1{margin:0;font-size:30px}
     .subtitle{color:var(--muted);font-size:14px;margin:8px 0 24px}
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+    .status-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 22px}
     @media(max-width:700px){.grid{grid-template-columns:1fr}}
+    @media(max-width:700px){.status-grid{grid-template-columns:repeat(2,1fr)}}
     .module{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:8px}
     .module.disabled{opacity:.5}
     .module-title{font-size:17px;font-weight:700}
     .module-desc{font-size:13px;color:var(--muted);line-height:1.5;flex-grow:1}
     .module a.open-link{align-self:flex-start;text-decoration:none;color:#fff;background:var(--blue);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:700}
+    .status-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .status-value{font-size:22px;font-weight:800}
+    .status-label{font-size:11px;color:var(--muted);line-height:1.35}
+    .status-note{margin:0 0 18px;color:var(--muted);font-size:13px}
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
     .badge.soon{background:#2a3755;color:var(--muted)}
     .msg{margin-top:18px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px}
@@ -38,6 +44,14 @@
       conservation, education, and partnership systems. Engineering Memory is
       one module within the larger administrative layer.
     </div>
+
+    <div class="status-grid" id="opsStatus" aria-live="polite">
+      <div class="status-card"><div class="status-value">--</div><div class="status-label">Working modules</div></div>
+      <div class="status-card"><div class="status-value">--</div><div class="status-label">Partial modules</div></div>
+      <div class="status-card"><div class="status-value">--</div><div class="status-label">Science pipelines waiting</div></div>
+      <div class="status-card"><div class="status-value">--</div><div class="status-label">Readiness score</div></div>
+    </div>
+    <div class="status-note" id="opsRecommendation">Loading operational inventory...</div>
 
     <div class="grid">
       <div class="module">
@@ -143,6 +157,32 @@
       el.href = url.pathname + url.search + url.hash;
     });
   }
+  var statusEl = document.getElementById('opsStatus');
+  var recommendationEl = document.getElementById('opsRecommendation');
+  var headers = token ? {'Authorization': 'Bearer ' + token} : {};
+  fetch('/api/v1/mission-control/status', {headers: headers})
+    .then(function(res){
+      if (!res.ok) throw new Error('status ' + res.status);
+      return res.json();
+    })
+    .then(function(data){
+      var mc = data.status_counts.mission_control || {};
+      var science = data.status_counts.science_pipelines || {};
+      var values = [
+        mc.operational || 0,
+        mc.partially_implemented || 0,
+        science.pipeline_not_yet_implemented || 0,
+        (data.readiness && data.readiness.score != null ? data.readiness.score + '/100' : '--')
+      ];
+      Array.prototype.forEach.call(statusEl.querySelectorAll('.status-value'), function(el, idx){
+        el.textContent = values[idx];
+      });
+      var next = (data.next_five_builds || [])[0] || 'No recommendation available from current repository evidence.';
+      recommendationEl.textContent = 'Calyx operational recommendation: ' + next;
+    })
+    .catch(function(){
+      recommendationEl.textContent = 'Operational inventory unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+    });
 })();
 </script>
 </body>
