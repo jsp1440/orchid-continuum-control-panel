@@ -372,3 +372,35 @@ used by `calyx.py` and `evaluation.py`. `fetch_state`-equivalent database
 reads happen only inside `run_observation_engine`; every `detect_*`
 function and `reconcile()` itself take already-fetched data and are
 fully unit-testable.
+
+## Mission Control Operational Status (BUILD-INFRA-003)
+
+Mission Control now has a single operational inventory endpoint:
+
+```
+GET /api/v1/mission-control/status
+```
+
+It is gated by the same `ADMIN_PANEL_TOKEN` as the rest of Mission Control.
+The endpoint reports the repository-local operational state for existing
+modules, science pipelines, homepage data-flow surfaces, schedule
+recommendations, readiness score, deployment flags, and the next five
+recommended builds. The landing page (`/admin.html`) consumes this endpoint
+directly so the first screen shows how many modules are operational, how
+many are partial, how many science pipelines are waiting for implementation,
+and the current readiness score.
+
+This inventory is deliberately evidence-backed:
+
+- Existing modules cite concrete files, routes, environment variables, and
+  tables already present in this repository.
+- Missing science systems such as literature, pollinators, mycorrhiza,
+  knowledge graph, conservation, and education are reported as
+  `pipeline_not_yet_implemented`, not approximated.
+- Database table counts are included only when `DATABASE_URL` is reachable;
+  otherwise the endpoint reports the database blocker explicitly.
+- Deployment flags are generated from this repository's actual change
+  shape: backend deployment required, frontend deployment not required,
+  database migration not required, Render configuration change not required.
+
+The pure synthesis logic is covered by `test_operational.py`.

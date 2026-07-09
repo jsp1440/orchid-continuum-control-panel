@@ -20,6 +20,7 @@ from agents import router as agents_router
 from calyx import router as calyx_router
 from memory import router as memory_router
 from observation import router as observation_router
+from operational import router as operational_router
 
 APP_TITLE = "Orchid Continuum API"
 APP_VERSION = "1.11"
@@ -37,6 +38,7 @@ app.include_router(admin_router)
 app.include_router(agents_router)
 app.include_router(calyx_router)
 app.include_router(observation_router)
+app.include_router(operational_router)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
