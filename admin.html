@@ -97,6 +97,12 @@
       </div>
 
       <div class="module">
+        <div class="module-title">Calyx Report</div>
+        <div class="module-desc">Generate evidence-grounded FCOS newsletter articles. Supports conservation survey, spotlight, and custom topics with Markdown preview, copy, and download.</div>
+        <a class="open-link" id="linkCalyxReport" href="/calyx-report.html">Open</a>
+      </div>
+
+      <div class="module">
         <div class="module-title">Observation Engine</div>
         <div class="module-desc">Immutable evidence feeding Evaluation and the Mission Brief: current observations, domain coverage, scan history.</div>
         <a class="open-link" id="linkObservations" href="/observations.html">Open</a>
@@ -150,7 +156,7 @@
   var params = new URLSearchParams(window.location.search);
   var token = params.get('token');
   if (token) {
-    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations'].forEach(function(id){
+    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkCalyxReport', 'linkObservations'].forEach(function(id){
       var el = document.getElementById(id);
       var url = new URL(el.href, window.location.origin);
       url.searchParams.set('token', token);

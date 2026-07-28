@@ -18,6 +18,7 @@ from admin import require_admin_token
 from admin import router as admin_router
 from agents import router as agents_router
 from calyx import router as calyx_router
+from calyx_report import router as calyx_report_router
 from memory import router as memory_router
 from observation import router as observation_router
 from operational import router as operational_router
@@ -37,6 +38,7 @@ app.include_router(memory_router)
 app.include_router(admin_router)
 app.include_router(agents_router)
 app.include_router(calyx_router)
+app.include_router(calyx_report_router)
 app.include_router(observation_router)
 app.include_router(operational_router)
 
@@ -487,6 +489,14 @@ def serve_calyx_html():
     path = Path(__file__).resolve().parent / "calyx.html"
     if not path.exists():
         raise HTTPException(status_code=404, detail="calyx.html not found")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.get("/calyx-report.html", dependencies=[Depends(require_admin_token)])
+def serve_calyx_report_html():
+    path = Path(__file__).resolve().parent / "calyx_report.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="calyx_report.html not found")
     return FileResponse(path, media_type="text/html")
 
 

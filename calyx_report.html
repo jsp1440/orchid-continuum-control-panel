@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchid Continuum - Calyx Report</title>
+  <style>
+    :root {
+      --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
+      --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
+    .wrap{max-width:1100px;margin:0 auto;padding:28px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+    .topbar h1{margin:0;font-size:30px}
+    .subtitle{color:var(--muted);font-size:14px;margin:8px 0 22px}
+    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px;font-size:14px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .panel h2{margin:0 0 14px;font-size:19px}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+    @media(max-width:700px){.form-row{grid-template-columns:1fr}}
+    .form-group{display:flex;flex-direction:column;gap:6px}
+    .form-group label{font-size:13px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+    select,input[type=number],input[type=text]{width:100%;padding:9px 11px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit}
+    select:focus,input:focus{outline:none;border-color:var(--blue)}
+    .checkbox-group{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+    .checkbox-label{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none}
+    .checkbox-label input[type=checkbox]{accent-color:var(--blue);width:15px;height:15px;cursor:pointer}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle}
+    .badge.limited{background:var(--warn);color:#3a2a04}
+    .badge.full{background:var(--ok);color:#04261a}
+    .badge.unavailable{background:#2a3755;color:var(--muted)}
+    .mode-banner{border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;line-height:1.5}
+    .mode-banner.limited{background:#2a2000;border:1px solid var(--warn);color:var(--warn)}
+    .mode-banner.full{background:#002a18;border:1px solid var(--ok);color:var(--ok)}
+    .mode-banner.unavailable{background:#1a1f35;border:1px solid var(--border);color:var(--muted)}
+    button{padding:10px 18px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer;font-size:14px;transition:opacity .15s}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+    button.secondary:hover:not(:disabled){background:var(--border)}
+    .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+    .msg{margin-top:10px;font-size:13px;line-height:1.5}
+    .msg.error{color:var(--err)}
+    .msg.ok{color:var(--ok)}
+    .msg.warn{color:var(--warn)}
+    .evidence-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px}
+    .evidence-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+    .evidence-value{font-weight:700}
+    .evidence-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media(max-width:700px){.evidence-grid{grid-template-columns:1fr}}
+    .markdown-preview{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-x:auto;max-height:520px;overflow-y:auto;font-family:monospace}
+    .result-meta{font-size:12px;color:var(--muted);margin-bottom:10px}
+    .spinner{display:inline-block;width:16px;height:16px;border:2.5px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .toggle-row{display:flex;align-items:center;gap:10px;margin-top:4px}
+    .toggle-switch{position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0}
+    .toggle-switch input{opacity:0;width:0;height:0}
+    .toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--panel2);border:1px solid var(--border);border-radius:22px;transition:.2s}
+    .toggle-slider:before{position:absolute;content:"";height:14px;width:14px;left:3px;bottom:3px;background:var(--muted);border-radius:50%;transition:.2s}
+    input:checked+.toggle-slider{background:var(--blue);border-color:var(--blue)}
+    input:checked+.toggle-slider:before{transform:translateX(16px);background:#fff}
+    .toggle-label{font-size:13px;color:var(--muted)}
+    .toggle-label strong{color:var(--text)}
+    .section-divider{border:none;border-top:1px solid var(--border);margin:18px 0}
+    .preset-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    .preset-btn{padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;transition:border-color .15s}
+    .preset-btn:hover{border-color:var(--blue)}
+    .preset-btn.active{border-color:var(--blue);background:#12203e;color:var(--blue)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Calyx Report <span class="badge limited" id="engineBadge">limited evidence</span></h1>
+      <a class="back-link" id="backLink" href="/admin.html">Back to Mission Control</a>
+    </div>
+    <div class="subtitle">Generate evidence-grounded FCOS newsletter articles. No claims are fabricated — article content is grounded in available institutional data only.</div>
+
+    <!-- Evidence Mode Banner -->
+    <div id="modeBanner" class="mode-banner limited">
+      <strong>Limited-evidence mode.</strong>
+      The Journalism Engine (orchid-calyx-backend#173) is not yet available.
+      Specific project counts, current project status, and primary literature citations are omitted rather than fabricated.
+    </div>
+
+    <!-- Evidence Preview -->
+    <div class="panel" id="evidencePanel">
+      <h2>Available Evidence <span style="font-size:13px;color:var(--muted);font-weight:400" id="evidenceStatus">Loading…</span></h2>
+      <div id="evidenceContent"><div style="color:var(--muted);font-size:13px">Fetching available evidence…</div></div>
+      <div id="evidenceMsg" class="msg"></div>
+    </div>
+
+    <!-- Report Configuration -->
+    <div class="panel">
+      <h2>Report Configuration</h2>
+
+      <div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Presets</div>
+      <div class="preset-strip">
+        <button class="preset-btn active" id="presetFcos" type="button" onclick="applyPreset('fcos_conservation')">FCOS Conservation Survey</button>
+        <button class="preset-btn" id="presetSpotlight" type="button" onclick="applyPreset('fcos_spotlight')">FCOS Spotlight</button>
+        <button class="preset-btn" id="presetCustom" type="button" onclick="applyPreset('custom')">Custom</button>
+      </div>
+      <hr class="section-divider">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="selPublication">Publication</label>
+          <select id="selPublication">
+            <option value="fcos_newsletter">Five Cities Orchid Society Newsletter</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="selTopic">Topic / Theme</label>
+          <select id="selTopic" onchange="onTopicChange()">
+            <option value="conservation_survey">Conservation projects around the world</option>
+            <option value="conservation_spotlight">Conservation spotlight</option>
+            <option value="new_species">New species and taxonomy</option>
+            <option value="pollination">Pollination</option>
+            <option value="mycorrhizae">Mycorrhizae and germination</option>
+            <option value="habitat_climate">Habitat and climate</option>
+            <option value="research_trends">Research trends</option>
+            <option value="custom">Custom topic…</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" id="customTopicRow" style="display:none;margin-bottom:14px">
+        <label for="inputCustomTopic">Custom Topic Text</label>
+        <input type="text" id="inputCustomTopic" placeholder="e.g. Dracula orchids of Ecuador" maxlength="200">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="selAudience">Audience</label>
+          <select id="selAudience">
+            <option value="general_members">General members</option>
+            <option value="advanced_growers">Advanced growers</option>
+            <option value="researchers">Researchers and academics</option>
+            <option value="public">General public</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="inputWordCount">Target word count</label>
+          <input type="number" id="inputWordCount" min="200" max="3000" step="50" value="1000">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="selCitationMode">Citation mode</label>
+          <select id="selCitationMode">
+            <option value="none">None</option>
+            <option value="source_list" selected>Source list</option>
+            <option value="inline">Inline</option>
+            <option value="numbered_endnotes">Numbered endnotes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="selConfidenceMode">Confidence mode</label>
+          <select id="selConfidenceMode">
+            <option value="exploratory">Exploratory</option>
+            <option value="standard" selected>Standard</option>
+            <option value="high_confidence_only">High-confidence only</option>
+          </select>
+        </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Optional sections</label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" id="chkCalyxPerspective" value="calyx_perspective"> Calyx Perspective</label>
+          <label class="checkbox-label"><input type="checkbox" id="chkKnowledgeGap" value="knowledge_gap"> Knowledge gap</label>
+          <label class="checkbox-label"><input type="checkbox" id="chkGrowerAction" value="grower_action"> Grower action</label>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Visuals (request, not generated)</label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" id="visMap" value="map"> Map</label>
+          <label class="checkbox-label"><input type="checkbox" id="visChart" value="chart"> Chart</label>
+          <label class="checkbox-label"><input type="checkbox" id="visTable" value="table"> Table</label>
+          <label class="checkbox-label"><input type="checkbox" id="visTimeline" value="timeline"> Timeline</label>
+          <label class="checkbox-label"><input type="checkbox" id="visNone" value="none" checked> None</label>
+        </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <div class="form-group">
+        <label>Evidence mode</label>
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleFullContinuum" onchange="onModeToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label" id="modeToggleLabel">
+            <strong>Limited evidence</strong> — using existing Calyx briefing data
+          </span>
+        </div>
+        <div id="fullContinuumNote" style="display:none;margin-top:8px;font-size:12px;color:var(--warn)">
+          ⚠ Full Continuum mode requires the Journalism Engine (orchid-calyx-backend#173), which is not yet available. The article will fall back to limited-evidence mode with an explicit disclosure.
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:18px">
+        <button id="generateBtn" type="button" onclick="generateReport()">Generate Article</button>
+        <button class="secondary" type="button" onclick="resetForm()">Reset</button>
+      </div>
+      <div id="generateMsg" class="msg"></div>
+    </div>
+
+    <!-- Result -->
+    <div class="panel" id="resultPanel" style="display:none">
+      <h2>Generated Article</h2>
+      <div id="resultMeta" class="result-meta"></div>
+      <div class="btn-row" style="margin-bottom:14px">
+        <button class="secondary" type="button" id="copyBtn" onclick="copyMarkdown()">Copy Markdown</button>
+        <button class="secondary" type="button" id="downloadBtn" onclick="downloadMarkdown()">Download .md</button>
+      </div>
+      <pre class="markdown-preview" id="markdownPreview"></pre>
+    </div>
+  </div>
+
+  <script>
+    // ---------- state ----------
+    const STORAGE_KEY = 'calyx_report_form_v1';
+    var _lastMarkdown = '';
+    var _token = '';
+    var _evidenceLoaded = false;
+
+    // ---------- token ----------
+    function getToken() {
+      var params = new URLSearchParams(window.location.search);
+      var t = params.get('token') || localStorage.getItem('admin_token') || '';
+      _token = t;
+      return t;
+    }
+
+    function authHeaders() {
+      var t = getToken();
+      return t ? {'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json'} : {'Content-Type': 'application/json'};
+    }
+
+    // ---------- back link token passthrough ----------
+    (function() {
+      var t = getToken();
+      if (t) {
+        document.getElementById('backLink').href = '/admin.html?token=' + encodeURIComponent(t);
+      }
+    })();
+
+    // ---------- evidence preview ----------
+    function loadEvidence() {
+      var statusEl = document.getElementById('evidenceStatus');
+      var contentEl = document.getElementById('evidenceContent');
+      var msgEl = document.getElementById('evidenceMsg');
+      statusEl.textContent = 'Loading…';
+      msgEl.textContent = '';
+
+      fetch('/api/v1/calyx-report/evidence-preview', {headers: authHeaders()})
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          _evidenceLoaded = true;
+          statusEl.textContent = '';
+          renderEvidence(data);
+          updateModeBanner(data.journalism_engine_available);
+        })
+        .catch(function(err) {
+          statusEl.textContent = '';
+          msgEl.className = 'msg error';
+          if (err.message && err.message.includes('401')) {
+            msgEl.textContent = 'Authentication required. Add ?token=YOUR_TOKEN to the URL.';
+          } else {
+            msgEl.textContent = 'Evidence preview unavailable: ' + err.message + '. Form is still usable.';
+          }
+          contentEl.innerHTML = '<div style="color:var(--muted);font-size:13px">No evidence data available — article will use limited-evidence mode.</div>';
+          updateModeBanner(false);
+        });
+    }
+
+    function renderEvidence(data) {
+      var ev = data.evidence || {};
+      var sources = ev.data_sources || [];
+      var html = '<div class="evidence-grid">';
+
+      html += '<div class="evidence-item"><div class="evidence-label">Evidence mode</div><div class="evidence-value">' + (ev.mode || 'limited') + '</div></div>';
+
+      if (ev.taxonomy_families_covered != null) {
+        html += '<div class="evidence-item"><div class="evidence-label">Orchid families tracked</div><div class="evidence-value">' + ev.taxonomy_families_covered + '</div></div>';
+      }
+      if (ev.taxonomy_species_covered != null) {
+        html += '<div class="evidence-item"><div class="evidence-label">Species tracked</div><div class="evidence-value">' + ev.taxonomy_species_covered + '</div></div>';
+      }
+      if (ev.observation_count != null) {
+        html += '<div class="evidence-item"><div class="evidence-label">Observations</div><div class="evidence-value">' + ev.observation_count + '</div></div>';
+      }
+
+      html += '</div>';
+
+      if (sources.length > 0) {
+        html += '<div style="font-size:12px;color:var(--muted);margin-top:10px">Data sources available: ' + sources.join(', ') + '</div>';
+      } else {
+        html += '<div style="font-size:12px;color:var(--muted);margin-top:10px">No structured data sources available. Journalism Engine not yet connected.</div>';
+      }
+
+      if (ev.recent_finding_summaries && ev.recent_finding_summaries.length > 0) {
+        html += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Recent findings: ' + ev.recent_finding_summaries.join(' · ') + '</div>';
+      }
+
+      document.getElementById('evidenceContent').innerHTML = html;
+    }
+
+    function updateModeBanner(engineAvailable) {
+      var banner = document.getElementById('modeBanner');
+      var badge = document.getElementById('engineBadge');
+      if (engineAvailable) {
+        banner.className = 'mode-banner full';
+        banner.innerHTML = '<strong>Full Continuum mode available.</strong> The Journalism Engine is connected. Evidence-grounded articles with full citations are supported.';
+        badge.className = 'badge full';
+        badge.textContent = 'full continuum';
+      } else {
+        banner.className = 'mode-banner limited';
+        banner.innerHTML = '<strong>Limited-evidence mode.</strong> The Journalism Engine (orchid-calyx-backend#173) is not yet available. Specific project counts, current project status, and primary literature citations are omitted rather than fabricated.';
+        badge.className = 'badge limited';
+        badge.textContent = 'limited evidence';
+      }
+    }
+
+    // ---------- form helpers ----------
+    function onTopicChange() {
+      var topic = document.getElementById('selTopic').value;
+      document.getElementById('customTopicRow').style.display = topic === 'custom' ? 'block' : 'none';
+      saveState();
+    }
+
+    function onModeToggle() {
+      var full = document.getElementById('toggleFullContinuum').checked;
+      var note = document.getElementById('fullContinuumNote');
+      var label = document.getElementById('modeToggleLabel');
+      note.style.display = full ? 'block' : 'none';
+      if (full) {
+        label.innerHTML = '<strong>Full Continuum</strong> — Journalism Engine (will fall back to limited-evidence if unavailable)';
+      } else {
+        label.innerHTML = '<strong>Limited evidence</strong> — using existing Calyx briefing data';
+      }
+      saveState();
+    }
+
+    function getCheckedValues(name) {
+      var boxes = document.querySelectorAll('input[type=checkbox][value=' + JSON.stringify(name) + ']');
+      // Actually, collect all checked checkboxes in a group by container
+      return [];
+    }
+
+    function collectOptionalSections() {
+      var vals = [];
+      ['calyx_perspective', 'knowledge_gap', 'grower_action'].forEach(function(v) {
+        var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+        if (el && el.checked) vals.push(v);
+      });
+      return vals;
+    }
+
+    function collectVisuals() {
+      var vals = [];
+      ['map', 'chart', 'table', 'timeline', 'none'].forEach(function(v) {
+        var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+        if (el && el.checked) vals.push(v);
+      });
+      return vals;
+    }
+
+    function buildPayload() {
+      return {
+        publication: document.getElementById('selPublication').value,
+        topic: document.getElementById('selTopic').value,
+        custom_topic: document.getElementById('inputCustomTopic').value.trim() || null,
+        audience: document.getElementById('selAudience').value,
+        word_count: parseInt(document.getElementById('inputWordCount').value, 10) || 1000,
+        citation_mode: document.getElementById('selCitationMode').value,
+        confidence_mode: document.getElementById('selConfidenceMode').value,
+        optional_sections: collectOptionalSections(),
+        visuals: collectVisuals(),
+        use_full_continuum: document.getElementById('toggleFullContinuum').checked
+      };
+    }
+
+    // ---------- presets ----------
+    var PRESETS = {
+      fcos_conservation: {
+        publication: 'fcos_newsletter',
+        topic: 'conservation_survey',
+        audience: 'general_members',
+        word_count: 1000,
+        citation_mode: 'source_list',
+        confidence_mode: 'standard',
+        optional_sections: ['grower_action'],
+        visuals: ['table']
+      },
+      fcos_spotlight: {
+        publication: 'fcos_newsletter',
+        topic: 'conservation_spotlight',
+        audience: 'general_members',
+        word_count: 800,
+        citation_mode: 'inline',
+        confidence_mode: 'standard',
+        optional_sections: [],
+        visuals: ['none']
+      },
+      custom: {
+        publication: 'fcos_newsletter',
+        topic: 'custom',
+        audience: 'general_members',
+        word_count: 1000,
+        citation_mode: 'none',
+        confidence_mode: 'exploratory',
+        optional_sections: [],
+        visuals: ['none']
+      }
+    };
+
+    function applyPreset(name) {
+      var preset = PRESETS[name];
+      if (!preset) return;
+      document.getElementById('selPublication').value = preset.publication;
+      document.getElementById('selTopic').value = preset.topic;
+      document.getElementById('selAudience').value = preset.audience;
+      document.getElementById('inputWordCount').value = preset.word_count;
+      document.getElementById('selCitationMode').value = preset.citation_mode;
+      document.getElementById('selConfidenceMode').value = preset.confidence_mode;
+      onTopicChange();
+      ['calyx_perspective', 'knowledge_gap', 'grower_action'].forEach(function(v) {
+        var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+        if (el) el.checked = (preset.optional_sections || []).indexOf(v) >= 0;
+      });
+      ['map', 'chart', 'table', 'timeline', 'none'].forEach(function(v) {
+        var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+        if (el) el.checked = (preset.visuals || []).indexOf(v) >= 0;
+      });
+      // highlight active preset button
+      ['presetFcos', 'presetSpotlight', 'presetCustom'].forEach(function(id) {
+        document.getElementById(id).classList.remove('active');
+      });
+      var idMap = {fcos_conservation: 'presetFcos', fcos_spotlight: 'presetSpotlight', custom: 'presetCustom'};
+      if (idMap[name]) document.getElementById(idMap[name]).classList.add('active');
+      saveState();
+    }
+
+    // ---------- state persistence ----------
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPayload()));
+        // Also remember active preset visually
+        var active = document.querySelector('.preset-btn.active');
+        if (active) localStorage.setItem(STORAGE_KEY + '_preset', active.id);
+      } catch(e) {}
+    }
+
+    function restoreState() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        var state = JSON.parse(raw);
+        if (state.publication) document.getElementById('selPublication').value = state.publication;
+        if (state.topic) document.getElementById('selTopic').value = state.topic;
+        if (state.custom_topic) document.getElementById('inputCustomTopic').value = state.custom_topic;
+        if (state.audience) document.getElementById('selAudience').value = state.audience;
+        if (state.word_count) document.getElementById('inputWordCount').value = state.word_count;
+        if (state.citation_mode) document.getElementById('selCitationMode').value = state.citation_mode;
+        if (state.confidence_mode) document.getElementById('selConfidenceMode').value = state.confidence_mode;
+        if (state.use_full_continuum) document.getElementById('toggleFullContinuum').checked = state.use_full_continuum;
+        ['calyx_perspective', 'knowledge_gap', 'grower_action'].forEach(function(v) {
+          var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+          if (el) el.checked = (state.optional_sections || []).indexOf(v) >= 0;
+        });
+        ['map', 'chart', 'table', 'timeline', 'none'].forEach(function(v) {
+          var el = document.querySelector('input[type=checkbox][value="' + v + '"]');
+          if (el) el.checked = (state.visuals || []).indexOf(v) >= 0;
+        });
+        onTopicChange();
+        onModeToggle();
+      } catch(e) {}
+    }
+
+    function resetForm() {
+      try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(STORAGE_KEY + '_preset'); } catch(e) {}
+      applyPreset('fcos_conservation');
+      document.getElementById('toggleFullContinuum').checked = false;
+      onModeToggle();
+      document.getElementById('generateMsg').textContent = '';
+      document.getElementById('resultPanel').style.display = 'none';
+    }
+
+    // ---------- generate ----------
+    function generateReport() {
+      var btn = document.getElementById('generateBtn');
+      var msgEl = document.getElementById('generateMsg');
+      var payload = buildPayload();
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Generating…';
+      msgEl.className = 'msg';
+      msgEl.textContent = '';
+
+      saveState();
+
+      fetch('/api/v1/calyx-report/generate', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(payload)
+      })
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(d) { throw d; });
+          return r.json();
+        })
+        .then(function(data) {
+          btn.disabled = false;
+          btn.textContent = 'Generate Article';
+          _lastMarkdown = data.markdown || '';
+          showResult(data);
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+          btn.textContent = 'Generate Article';
+          msgEl.className = 'msg error';
+          var detail = err.detail || err.message || JSON.stringify(err);
+          if (typeof detail === 'object' && detail.validation_errors) {
+            msgEl.textContent = 'Validation: ' + detail.validation_errors.join('; ');
+          } else if (typeof detail === 'string' && detail.includes('401')) {
+            msgEl.textContent = 'Authentication required. Add ?token=YOUR_TOKEN to the URL.';
+          } else {
+            msgEl.textContent = 'Generation failed: ' + (typeof detail === 'string' ? detail : JSON.stringify(detail));
+          }
+        });
+    }
+
+    function showResult(data) {
+      var panel = document.getElementById('resultPanel');
+      var meta = document.getElementById('resultMeta');
+      var preview = document.getElementById('markdownPreview');
+      var modeLabel = data.evidence_mode === 'full' ? 'Full Continuum' : 'Limited evidence';
+      meta.textContent = 'Mode: ' + modeLabel + ' · Words (approx): ' + (data.word_count || '—') + ' · Generated: ' + (data.generated_at || '').replace('T', ' ').substring(0, 19) + ' UTC';
+      preview.textContent = data.markdown || '';
+      panel.style.display = 'block';
+      panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
+    // ---------- copy / download ----------
+    function copyMarkdown() {
+      if (!_lastMarkdown) return;
+      navigator.clipboard.writeText(_lastMarkdown).then(function() {
+        var btn = document.getElementById('copyBtn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy Markdown'; }, 2000);
+      }).catch(function() {
+        // fallback for environments without clipboard API
+        var ta = document.createElement('textarea');
+        ta.value = _lastMarkdown;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        var btn = document.getElementById('copyBtn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy Markdown'; }, 2000);
+      });
+    }
+
+    function downloadMarkdown() {
+      if (!_lastMarkdown) return;
+      var topic = document.getElementById('selTopic').value;
+      var ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 16);
+      var filename = 'calyx-report-' + topic + '-' + ts + '.md';
+      var blob = new Blob([_lastMarkdown], {type: 'text/markdown'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      setTimeout(function() { URL.revokeObjectURL(url); document.body.removeChild(a); }, 500);
+    }
+
+    // ---------- event listeners for state save ----------
+    ['selPublication', 'selTopic', 'selAudience', 'selCitationMode', 'selConfidenceMode'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveState);
+    });
+    ['inputWordCount', 'inputCustomTopic'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', saveState);
+    });
+    document.querySelectorAll('input[type=checkbox]').forEach(function(el) {
+      el.addEventListener('change', saveState);
+    });
+
+    // ---------- init ----------
+    restoreState();
+    loadEvidence();
+  </script>
+</body>
+</html>
