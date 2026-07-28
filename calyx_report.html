@@ -80,8 +80,8 @@
     <!-- Evidence Mode Banner -->
     <div id="modeBanner" class="mode-banner limited">
       <strong>Limited-evidence mode.</strong>
-      The Journalism Engine (orchid-calyx-backend#173) is not yet available.
-      Specific project counts, current project status, and primary literature citations are omitted rather than fabricated.
+      The Journalism Engine (<code>JOURNALISM_ENGINE_URL</code>) is not yet available.
+      Specific project counts, current project status, and primary literature citations are omitted rather than fabricated. Output is a structured evidence summary only.
     </div>
 
     <!-- Evidence Preview -->
@@ -202,7 +202,7 @@
           </span>
         </div>
         <div id="fullContinuumNote" style="display:none;margin-top:8px;font-size:12px;color:var(--warn)">
-          ⚠ Full Continuum mode requires the Journalism Engine (orchid-calyx-backend#173), which is not yet available. The article will fall back to limited-evidence mode with an explicit disclosure.
+          ⚠ Journalism Engine (<code>JOURNALISM_ENGINE_URL</code>) availability is checked at request time. If unavailable, output will be a structured evidence summary, not a completed article.
         </div>
       </div>
 
@@ -217,6 +217,12 @@
     <div class="panel" id="resultPanel" style="display:none">
       <h2>Generated Article</h2>
       <div id="resultMeta" class="result-meta"></div>
+      <div id="resultWarnings" style="display:none;margin-bottom:12px"></div>
+      <div id="resultInsufficient" class="mode-banner limited" style="display:none;margin-bottom:12px">
+        <strong>Insufficient evidence.</strong> The backend reported that available evidence is insufficient for the requested topic and audience. The output may be incomplete.
+      </div>
+      <div id="resultProjectTable" style="display:none;margin-bottom:14px"></div>
+      <div id="resultCitations" style="display:none;margin-bottom:14px"></div>
       <div class="btn-row" style="margin-bottom:14px">
         <button class="secondary" type="button" id="copyBtn" onclick="copyMarkdown()">Copy Markdown</button>
         <button class="secondary" type="button" id="downloadBtn" onclick="downloadMarkdown()">Download .md</button>
@@ -290,7 +296,7 @@
       var sources = ev.data_sources || [];
       var html = '<div class="evidence-grid">';
 
-      html += '<div class="evidence-item"><div class="evidence-label">Evidence mode</div><div class="evidence-value">' + (ev.mode || 'limited') + '</div></div>';
+      html += '<div class="evidence-item"><div class="evidence-label">Evidence mode</div><div class="evidence-value">' + (ev.mode || data.mode || 'limited') + '</div></div>';
 
       if (ev.taxonomy_families_covered != null) {
         html += '<div class="evidence-item"><div class="evidence-label">Orchid families tracked</div><div class="evidence-value">' + ev.taxonomy_families_covered + '</div></div>';
@@ -314,7 +320,46 @@
         html += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Recent findings: ' + ev.recent_finding_summaries.join(' · ') + '</div>';
       }
 
+      // Backend project table (full-continuum mode)
+      var projectTable = data.project_table || ev.project_table || [];
+      if (projectTable.length > 0) {
+        html += renderProjectTable(projectTable);
+      }
+
+      // Backend warnings
+      var warnings = data.backend_warnings || data.warnings || [];
+      if (warnings.length > 0) {
+        html += '<div style="font-size:12px;color:var(--warn);margin-top:8px">⚠ ' + warnings.join(' · ') + '</div>';
+      }
+
       document.getElementById('evidenceContent').innerHTML = html;
+    }
+
+    function renderProjectTable(rows) {
+      if (!rows || rows.length === 0) return '';
+      var cols = Object.keys(rows[0]);
+      var html = '<div style="margin-top:10px"><div style="font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">Verified Projects</div>';
+      html += '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px">';
+      html += '<thead><tr>' + cols.map(function(c){ return '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);color:var(--muted)">' + c + '</th>'; }).join('') + '</tr></thead>';
+      html += '<tbody>';
+      rows.forEach(function(row) {
+        html += '<tr>' + cols.map(function(c){ return '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">' + (row[c] != null ? row[c] : '') + '</td>'; }).join('') + '</tr>';
+      });
+      html += '</tbody></table></div></div>';
+      return html;
+    }
+
+    function renderCitations(citations) {
+      if (!citations || citations.length === 0) return;
+      var el = document.getElementById('resultCitations');
+      var html = '<div style="font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">Citations</div><ol style="margin:0;padding-left:18px;font-size:12px">';
+      citations.forEach(function(c) {
+        var text = c.text || c.key || JSON.stringify(c);
+        html += '<li>' + text + '</li>';
+      });
+      html += '</ol>';
+      el.innerHTML = html;
+      el.style.display = 'block';
     }
 
     function updateModeBanner(engineAvailable) {
@@ -327,9 +372,21 @@
         badge.textContent = 'full continuum';
       } else {
         banner.className = 'mode-banner limited';
-        banner.innerHTML = '<strong>Limited-evidence mode.</strong> The Journalism Engine (orchid-calyx-backend#173) is not yet available. Specific project counts, current project status, and primary literature citations are omitted rather than fabricated.';
+        banner.innerHTML = '<strong>Limited-evidence mode.</strong> The Journalism Engine (<code>JOURNALISM_ENGINE_URL</code>) is not yet available. Specific project counts, current project status, and primary literature citations are omitted rather than fabricated. Output is a structured evidence summary only.';
         badge.className = 'badge limited';
         badge.textContent = 'limited evidence';
+      }
+      // Update the full-continuum toggle note to reflect actual backend state
+      var note = document.getElementById('fullContinuumNote');
+      var toggleChecked = document.getElementById('toggleFullContinuum').checked;
+      if (toggleChecked) {
+        if (engineAvailable) {
+          note.style.color = 'var(--ok)';
+          note.textContent = '✔ Journalism Engine is available. Full Continuum mode will be used.';
+        } else {
+          note.style.color = 'var(--warn)';
+          note.textContent = '⚠ Journalism Engine (JOURNALISM_ENGINE_URL) is not available. Output will be a structured evidence summary, not a completed article.';
+        }
       }
     }
 
@@ -346,9 +403,17 @@
       var label = document.getElementById('modeToggleLabel');
       note.style.display = full ? 'block' : 'none';
       if (full) {
-        label.innerHTML = '<strong>Full Continuum</strong> — Journalism Engine (will fall back to limited-evidence if unavailable)';
+        label.innerHTML = '<strong>Full Continuum</strong> — Journalism Engine (falls back to evidence summary if unavailable)';
+        var engineAvailable = document.getElementById('engineBadge').textContent.indexOf('full') >= 0;
+        if (engineAvailable) {
+          note.style.color = 'var(--ok)';
+          note.textContent = '✔ Journalism Engine is available. Full Continuum mode will be used.';
+        } else {
+          note.style.color = 'var(--warn)';
+          note.textContent = '⚠ Journalism Engine (JOURNALISM_ENGINE_URL) is not available. Output will be a structured evidence summary, not a completed article.';
+        }
       } else {
-        label.innerHTML = '<strong>Limited evidence</strong> — using existing Calyx briefing data';
+        label.innerHTML = '<strong>Limited evidence</strong> — structured evidence summary from Calyx data';
       }
       saveState();
     }
@@ -546,9 +611,49 @@
       var meta = document.getElementById('resultMeta');
       var preview = document.getElementById('markdownPreview');
       var modeLabel = data.evidence_mode === 'full' ? 'Full Continuum' : 'Limited evidence';
-      meta.textContent = 'Mode: ' + modeLabel + ' · Words (approx): ' + (data.word_count || '—') + ' · Generated: ' + (data.generated_at || '').replace('T', ' ').substring(0, 19) + ' UTC';
+      var metaParts = [
+        'Mode: ' + modeLabel,
+        'Words (approx): ' + (data.word_count || '—'),
+        'Generated: ' + (data.generated_at || '').replace('T', ' ').substring(0, 19) + ' UTC',
+      ];
+      if (data.confidence_score != null) {
+        metaParts.push('Confidence: ' + (data.confidence_score * 100).toFixed(0) + '%');
+      }
+      meta.textContent = metaParts.join(' · ');
       preview.textContent = data.markdown || '';
       panel.style.display = 'block';
+
+      // Insufficient evidence banner
+      var insuffEl = document.getElementById('resultInsufficient');
+      insuffEl.style.display = data.insufficient_evidence ? 'block' : 'none';
+
+      // Warnings
+      var warnEl = document.getElementById('resultWarnings');
+      var warnings = data.warnings || [];
+      if (warnings.length > 0) {
+        warnEl.innerHTML = warnings.map(function(w) {
+          return '<div class="mode-banner limited" style="margin-bottom:6px">⚠ ' + w + '</div>';
+        }).join('');
+        warnEl.style.display = 'block';
+      } else {
+        warnEl.style.display = 'none';
+        warnEl.innerHTML = '';
+      }
+
+      // Project table
+      var ptEl = document.getElementById('resultProjectTable');
+      var projectTable = data.project_table || [];
+      if (projectTable.length > 0) {
+        ptEl.innerHTML = renderProjectTable(projectTable);
+        ptEl.style.display = 'block';
+      } else {
+        ptEl.style.display = 'none';
+        ptEl.innerHTML = '';
+      }
+
+      // Citations
+      renderCitations(data.citations || []);
+
       panel.scrollIntoView({behavior: 'smooth', block: 'start'});
     }
 
