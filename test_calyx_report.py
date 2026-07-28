@@ -307,7 +307,7 @@ def test_capability_check_connection_error_returns_unavailable(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
     result = check_journalism_engine_capability()
     assert result["available"] is False
-    assert result.get("reason")
+    assert result.get("reason") == "Journalism Engine not reachable"
 
 
 def test_capability_check_successful_probe(monkeypatch):

@@ -121,8 +121,8 @@ def check_journalism_engine_capability() -> dict[str, Any]:
                 "available": False,
                 "reason": f"capability endpoint returned HTTP {resp.status}",
             }
-    except Exception as exc:
-        return {"available": False, "reason": str(exc)}
+    except Exception:
+        return {"available": False, "reason": "Journalism Engine not reachable"}
 
 
 # ---------- backend proxy ----------
@@ -584,9 +584,8 @@ def get_evidence_preview():
             backend_data["journalism_engine_available"] = True
             backend_data.setdefault("backend_warnings", capability.get("warnings", []))
             return backend_data
-        except RuntimeError as exc:
+        except RuntimeError:
             engine_available = False
-            capability["reason"] = str(exc)
 
     # Fallback: local limited-evidence
     calyx_state = _try_fetch_calyx_state()
@@ -594,7 +593,7 @@ def get_evidence_preview():
     return {
         "evidence": evidence,
         "journalism_engine_available": False,
-        "backend_unavailable_reason": capability.get("reason", ""),
+        "backend_unavailable_reason": "Journalism Engine not reachable" if engine_available is False else capability.get("reason", ""),
         "backend_warnings": [],
     }
 
@@ -623,13 +622,15 @@ def generate_report(req: ReportRequest):
             result = _call_journalism_backend("POST", "/generate", body=payload)
             result["journalism_engine_available"] = True
             return result
-        except RuntimeError as exc:
+        except RuntimeError:
             engine_available = False
-            capability["reason"] = str(exc)
 
     # Fallback: structured evidence summary (not a completed article)
     calyx_state = _try_fetch_calyx_state()
     evidence = build_evidence_preview(calyx_state)
     result = build_limited_evidence_summary(req, evidence)
-    result["backend_unavailable_reason"] = capability.get("reason", "")
+    if not capability.get("available", False):
+        result["backend_unavailable_reason"] = capability.get("reason", "Journalism Engine not configured")
+    else:
+        result["backend_unavailable_reason"] = "Journalism Engine not reachable"
     return result
