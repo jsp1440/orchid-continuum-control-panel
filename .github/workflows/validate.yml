@@ -1,0 +1,36 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: python-version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Syntax / import check
+        run: |
+          python -c "import ast; [ast.parse(open(f).read(), f) for f in ['app.py', 'calyx_report.py']]"
+          python -c "import app; import calyx_report"
+
+      - name: Run tests
+        run: |
+          python -m pytest test_calyx.py test_calyx_report.py test_evaluation.py test_observation.py test_operational.py test_admin_access.py -v
