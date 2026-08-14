@@ -153,6 +153,14 @@ MISSION_CONTROL_MODULES: list[dict[str, Any]] = [
         "next_action": "Add a GitHub-backed repository status integration; no local table or API exists today.",
     },
     {
+        "key": "external_service_health",
+        "name": "External Service Health",
+        "status": PARTIAL,
+        "evidence": ["external_health.py", "test_external_health.py", _route("/api/v1/mission-control/external-services"), _route("/api/v1/mission-control/calyx-backend-telemetry")],
+        "tables": [],
+        "next_action": "Add Research Station and Conservatory once a confirmed URL exists in the Brain's config/infrastructure_registry.json; do not guess a hostname for either.",
+    },
+    {
         "key": "deployment_status",
         "name": "Deployment Status",
         "status": PARTIAL,
@@ -195,7 +203,12 @@ SCIENCE_PIPELINES: list[dict[str, Any]] = [
         "background_runner": "oc_harvester_shim.py",
         "scheduler": None,
         "known_blockers": ["Harvester shim exists, but no scheduler is configured in render.yaml."],
-        "recommended_next_action": "Expose harvester heartbeat/run state in Mission Control.",
+        "recommended_next_action": (
+            "Harvester heartbeat/run state is now proxied live from orchid-calyx-backend's own "
+            "oc_admin.ocp_execution_jobs-backed telemetry via GET /api/v1/mission-control/"
+            "calyx-backend-telemetry (harvesters key) - a real Calyx-side check, not one this "
+            "service performs itself. Surface it in the Mission Control UI next."
+        ),
         "confidence": "high",
     },
     {
@@ -441,7 +454,7 @@ def build_operational_status(table_counts: dict[str, int | None] | None = None, 
             "evidence": "This change adds a backend API and admin HTML only; tables are still lazily created with CREATE TABLE IF NOT EXISTS.",
         },
         "next_five_builds": [
-            "Expose harvester heartbeat and run state in Mission Control.",
+            "Surface external_health.py's live Calyx Backend telemetry proxy (harvester heartbeat, runtime, DB connectivity) in the Mission Control UI - currently API-only via /api/v1/mission-control/calyx-backend-telemetry.",
             "Add repository/deployment status from a real GitHub/Render integration.",
             "Implement Brain Outbox drain/retry adapter.",
             "Connect Observation Engine history into Evaluation Engine scoring.",
