@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -42,3 +44,22 @@ def test_admin_dependency_still_requires_token(monkeypatch):
         require_admin_token(token=None, authorization=None)
     assert exc_info.value.status_code == 401
     assert require_admin_token(token="secret-token") is True
+
+
+def test_admin_html_renders_calyx_harvester_telemetry_not_just_reachability():
+    """The Calyx Backend Telemetry card must render real harvester/runtime
+    data (state, last run, warning counts) from the existing
+    /api/v1/mission-control/calyx-backend-telemetry proxy, not merely link
+    to the raw JSON -- see external_health.py's own documented next-build
+    note. Source-presence check: this repo has no JS test runner, so this
+    asserts the module card and its render wiring exist in the served file,
+    matching the pattern of the other admin_access tests in this file."""
+    body = Path("admin.html").read_text(encoding="utf-8")
+
+    assert "Calyx Backend Telemetry" in body
+    assert "calyx-backend-telemetry" in body
+    assert "calyxHarvesterList" in body
+    # Must render per-harvester fields, not just an overall reachability line.
+    assert "h.state" in body
+    assert "h.last_run" in body
+    assert "h.warning_count" in body
