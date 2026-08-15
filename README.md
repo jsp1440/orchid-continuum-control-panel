@@ -7,9 +7,10 @@ Mission Control is the password-protected administrative landing layer for
 the Orchid Continuum - not a single tool. **Engineering Memory is one
 module inside it**, not the product itself. The landing page shows module
 cards for what's live today (Engineering Memory, Brain Outbox, Health
-Check, Brain/DB Status, Atlas, AI Agents) plus disabled placeholders for
-what's planned (GitHub/Repo Status, Website Health, Grants Tracker,
-Partner Follow-ups, Research Station, Conservation Ops, Education/OCU).
+Check, Brain/DB Status, Atlas, AI Agents, External Service Health) plus
+disabled placeholders for what's planned (GitHub/Repo Status, Research
+Station / Conservatory Health, Grants Tracker, Partner Follow-ups,
+Conservation Ops, Education/OCU).
 More modules will be added to this same landing page over time; none of
 them require rebuilding the gate or the layout.
 
@@ -404,3 +405,59 @@ This inventory is deliberately evidence-backed:
   database migration not required, Render configuration change not required.
 
 The pure synthesis logic is covered by `test_operational.py`.
+
+## External Service Health (`external_health.py`)
+
+Mission Control's operational status endpoint above only reports on this
+repository's own local state. It never previously called any of the other
+live Orchid Continuum services - `/api/v1/mission-control/status` could
+call itself "operational" while the Calyx Backend was completely down, and
+nobody would know from this dashboard. `external_health.py` closes that
+gap with two endpoints that perform real, live outbound HTTP checks and
+report exactly what they observe - never a hardcoded "healthy":
+
+```
+GET /api/v1/mission-control/external-services
+GET /api/v1/mission-control/calyx-backend-telemetry
+```
+
+**`/external-services`** performs a live HTTP GET against each service
+listed in `jsp1440/Orchid-Continuum-Brain`'s
+`config/infrastructure_registry.json` (Calyx Backend `/health`, Orchid
+Continuum Frontend `/`, Harvester Frontend v3 `/`) and reports
+`reachable` / `error_status` / `unreachable` plus HTTP status and latency
+per service - a timeout or connection failure is reported as
+`unreachable`, never silently treated as healthy.
+
+Orchid Research Station and Orchid Conservatory are **not** checked: no
+confirmed public URL for either exists yet in the Brain's infrastructure
+registry (Research Station's `render.yaml` sets a health check path but
+records no deployed hostname; Conservatory deploys via Cloudflare Workers
+and isn't in the registry at all). They are listed in the response's
+`unconfirmed_services` with the specific reason, rather than guessing a
+Render/Cloudflare hostname and reporting whatever that guess happens to
+return - checking the wrong URL and calling it real would itself be a form
+of fabrication.
+
+**`/calyx-backend-telemetry`** proxies `orchid-calyx-backend`'s own
+real, live, read-only Mission Control telemetry API
+(`app/routers/mission_control.py`, BUILD-039/BUILD-065 in that repo) -
+`/api/mission-control/health`, `/harvesters` (harvester heartbeat from
+`oc_admin.ocp_execution_jobs`), and `/runtime`. That backend already
+performs its own database-backed checks; this proxies its answer
+honestly rather than re-implementing checks against a database this
+service does not own. If the live call fails, that failure is reported
+plainly (`"status": "unreachable"` with the real error message), never
+papered over.
+
+The admin landing page (`/admin.html`) shows a live summary of
+`/external-services` in its "External Service Health" module card.
+
+### Testing
+
+`test_external_health.py` covers the pure `classify()` status logic and
+`check_service()` / `get_calyx_backend_telemetry()` with an injected/
+monkeypatched fetch function - no real network call happens during
+`pytest`. The only network-touching functions in the module are `_fetch`
+and `_fetch_json`, exercised for real only when the deployed service
+actually receives a request.

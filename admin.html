@@ -30,6 +30,14 @@
     .status-note{margin:0 0 18px;color:var(--muted);font-size:13px}
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
     .badge.soon{background:#2a3755;color:var(--muted)}
+    .harvester-list{display:flex;flex-direction:column;gap:6px;font-size:12px}
+    .harvester-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+    .harvester-name{color:var(--text);font-weight:600}
+    .harvester-meta{color:var(--muted);font-size:11px}
+    .state-dot{display:inline-block;width:8px;height:8px;border-radius:999px;margin-right:6px;vertical-align:middle}
+    .state-dot.running,.state-dot.idle{background:var(--ok)}
+    .state-dot.error{background:var(--err)}
+    .state-dot.unknown,.state-dot.planned{background:var(--warn)}
     .msg{margin-top:18px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px}
     .mission{color:var(--text);font-size:14px;line-height:1.6;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-bottom:22px}
   </style>
@@ -107,9 +115,22 @@
         <div class="module-desc">CI status, open PRs, and stale branches across Orchid Continuum repos.</div>
       </div>
 
+      <div class="module">
+        <div class="module-title">External Service Health</div>
+        <div class="module-desc" id="externalHealthDesc">Live outbound checks against the Calyx Backend, Orchid Continuum Frontend, and Harvester Frontend v3. Loading...</div>
+        <a class="open-link" id="linkExternalServices" href="/api/v1/mission-control/external-services" target="_blank" rel="noopener">Open raw JSON</a>
+      </div>
+
+      <div class="module">
+        <div class="module-title">Calyx Backend Telemetry</div>
+        <div class="module-desc" id="calyxTelemetryDesc">Live proxy of the Calyx Backend's own harvester heartbeat and runtime job/action counts. Loading...</div>
+        <div class="harvester-list" id="calyxHarvesterList"></div>
+        <a class="open-link" id="linkCalyxTelemetry" href="/api/v1/mission-control/calyx-backend-telemetry" target="_blank" rel="noopener">Open raw JSON</a>
+      </div>
+
       <div class="module disabled">
-        <div class="module-title">Website Health <span class="badge soon">coming soon</span></div>
-        <div class="module-desc">Uptime and latency checks for public-facing Orchid Continuum sites.</div>
+        <div class="module-title">Research Station / Conservatory Health <span class="badge soon">not wired</span></div>
+        <div class="module-desc">No confirmed public URL exists yet in the Brain's config/infrastructure_registry.json for either service, so no check is performed. Guessing a URL would risk checking the wrong thing and reporting it as real. See README.</div>
       </div>
 
       <div class="module disabled">
@@ -150,7 +171,7 @@
   var params = new URLSearchParams(window.location.search);
   var token = params.get('token');
   if (token) {
-    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations'].forEach(function(id){
+    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations', 'linkExternalServices', 'linkCalyxTelemetry'].forEach(function(id){
       var el = document.getElementById(id);
       var url = new URL(el.href, window.location.origin);
       url.searchParams.set('token', token);
@@ -182,6 +203,88 @@
     })
     .catch(function(){
       recommendationEl.textContent = 'Operational inventory unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+    });
+
+  var externalHealthDescEl = document.getElementById('externalHealthDesc');
+  fetch('/api/v1/mission-control/external-services', {headers: headers})
+    .then(function(res){
+      if (!res.ok) throw new Error('status ' + res.status);
+      return res.json();
+    })
+    .then(function(data){
+      var lines = (data.services || []).map(function(s){
+        var mark = s.status === 'reachable' ? 'reachable' : (s.status === 'error_status' ? ('HTTP ' + s.http_status) : 'unreachable');
+        return s.display_name + ': ' + mark;
+      });
+      externalHealthDescEl.textContent = 'Live check (' + (data.generated_at || '') + '): ' + lines.join(' • ');
+    })
+    .catch(function(){
+      externalHealthDescEl.textContent = 'External service health check unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+    });
+
+  var calyxTelemetryDescEl = document.getElementById('calyxTelemetryDesc');
+  var calyxHarvesterListEl = document.getElementById('calyxHarvesterList');
+  fetch('/api/v1/mission-control/calyx-backend-telemetry', {headers: headers})
+    .then(function(res){
+      if (!res.ok) throw new Error('status ' + res.status);
+      return res.json();
+    })
+    .then(function(data){
+      var results = data.results || {};
+      if (!results.harvesters || results.harvesters.ok !== true) {
+        var reason = (results.harvesters && results.harvesters.error) || 'unreachable';
+        calyxTelemetryDescEl.textContent = 'Calyx Backend telemetry unavailable: ' + reason;
+        calyxHarvesterListEl.textContent = '';
+        return;
+      }
+      var harvesters = (results.harvesters.body && results.harvesters.body.harvesters) || [];
+      var runtimeBody = (results.runtime && results.runtime.ok && results.runtime.body && results.runtime.body.runtime) || null;
+      var runningCount = harvesters.filter(function(h){ return h.state === 'running'; }).length;
+      var errorCount = harvesters.filter(function(h){ return h.state === 'error'; }).length;
+      var summary = harvesters.length + ' harvester(s): ' + runningCount + ' running, ' + errorCount + ' with errors.';
+      if (runtimeBody && runtimeBody.metrics) {
+        var jobsTable = runtimeBody.metrics.runtime_jobs && runtimeBody.metrics.runtime_jobs.table;
+        if (jobsTable) {
+          summary += ' Runtime jobs table: ' + (runtimeBody.metrics.runtime_jobs.count || 0) + ' row(s).';
+        }
+      }
+      calyxTelemetryDescEl.textContent = summary + ' (' + (data.generated_at || '') + ')';
+
+      calyxHarvesterListEl.textContent = '';
+      harvesters.forEach(function(h){
+        var row = document.createElement('div');
+        row.className = 'harvester-row';
+
+        var left = document.createElement('div');
+        var dot = document.createElement('span');
+        dot.className = 'state-dot ' + (h.state || 'unknown');
+        var name = document.createElement('span');
+        name.className = 'harvester-name';
+        name.textContent = h.name || h.id || 'unknown harvester';
+        left.appendChild(dot);
+        left.appendChild(name);
+        if (h.warning_count) {
+          var warn = document.createElement('span');
+          warn.className = 'badge';
+          warn.style.background = 'var(--err)';
+          warn.style.color = '#0a0f1c';
+          warn.style.marginLeft = '6px';
+          warn.textContent = h.warning_count + ' warning' + (h.warning_count === 1 ? '' : 's');
+          left.appendChild(warn);
+        }
+
+        var meta = document.createElement('span');
+        meta.className = 'harvester-meta';
+        meta.textContent = (h.state || 'unknown') + ' • last run: ' + (h.last_run || 'never');
+
+        row.appendChild(left);
+        row.appendChild(meta);
+        calyxHarvesterListEl.appendChild(row);
+      });
+    })
+    .catch(function(){
+      calyxTelemetryDescEl.textContent = 'Calyx Backend telemetry unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+      calyxHarvesterListEl.textContent = '';
     });
 })();
 </script>
