@@ -19,6 +19,7 @@ from admin import router as admin_router
 from agents import router as agents_router
 from calyx import router as calyx_router
 from external_health import router as external_health_router
+from journalism_report import router as journalism_report_router
 from memory import router as memory_router
 from observation import router as observation_router
 from operational import router as operational_router
@@ -41,6 +42,7 @@ app.include_router(calyx_router)
 app.include_router(observation_router)
 app.include_router(operational_router)
 app.include_router(external_health_router)
+app.include_router(journalism_report_router)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 

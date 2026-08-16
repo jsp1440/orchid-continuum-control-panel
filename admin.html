@@ -128,6 +128,19 @@
         <a class="open-link" id="linkCalyxTelemetry" href="/api/v1/mission-control/calyx-backend-telemetry" target="_blank" rel="noopener">Open raw JSON</a>
       </div>
 
+      <div class="module" id="journalismReportModule">
+        <div class="module-title">Journalism Report</div>
+        <div class="module-desc" id="journalismReportDesc">Read-only proxy to the Calyx Backend's journalism generation contract. Loading...</div>
+        <div id="journalismReportBody" style="display:none;font-size:12px;color:var(--muted)">
+          <div id="journalismPresetsList" style="margin-bottom:8px"></div>
+          <button type="button" id="journalismPreviewBtn" style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer">Build evidence preview (no evidence items)</button>
+          <pre id="journalismPreviewOutput" style="white-space:pre-wrap;word-break:break-word;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px;max-height:180px;overflow:auto"></pre>
+          <button type="button" id="journalismGenerateBtn" style="display:none;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-top:6px">Generate article from this evidence packet</button>
+          <pre id="journalismGenerateOutput" style="white-space:pre-wrap;word-break:break-word;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px;max-height:220px;overflow:auto"></pre>
+        </div>
+        <a class="open-link" id="linkJournalismReport" href="/api/v1/mission-control/journalism-report/status" target="_blank" rel="noopener">Open raw JSON</a>
+      </div>
+
       <div class="module disabled">
         <div class="module-title">Research Station / Conservatory Health <span class="badge soon">not wired</span></div>
         <div class="module-desc">No confirmed public URL exists yet in the Brain's config/infrastructure_registry.json for either service, so no check is performed. Guessing a URL would risk checking the wrong thing and reporting it as real. See README.</div>
@@ -171,7 +184,7 @@
   var params = new URLSearchParams(window.location.search);
   var token = params.get('token');
   if (token) {
-    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations', 'linkExternalServices', 'linkCalyxTelemetry'].forEach(function(id){
+    ['linkMemory', 'linkOutbox', 'linkAgents', 'linkCalyx', 'linkObservations', 'linkExternalServices', 'linkCalyxTelemetry', 'linkJournalismReport'].forEach(function(id){
       var el = document.getElementById(id);
       var url = new URL(el.href, window.location.origin);
       url.searchParams.set('token', token);
@@ -286,6 +299,100 @@
       calyxTelemetryDescEl.textContent = 'Calyx Backend telemetry unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
       calyxHarvesterListEl.textContent = '';
     });
+
+  // ---------- Journalism Report ----------
+  // Read-only-first: on load, this only checks whether the Calyx Backend
+  // credential is configured and (if so) lists presets - no generation
+  // happens automatically. "Build evidence preview" and "Generate" are
+  // explicit operator actions. If evidence-preview comes back with no
+  // verified projects, the Generate button stays hidden - this UI never
+  // offers to generate from evidence it knows is empty, and it never
+  // renders anything but the real backend's own JSON response.
+  var journalismDescEl = document.getElementById('journalismReportDesc');
+  var journalismBodyEl = document.getElementById('journalismReportBody');
+  var journalismPresetsListEl = document.getElementById('journalismPresetsList');
+  var journalismPreviewBtn = document.getElementById('journalismPreviewBtn');
+  var journalismPreviewOutputEl = document.getElementById('journalismPreviewOutput');
+  var journalismGenerateBtn = document.getElementById('journalismGenerateBtn');
+  var journalismGenerateOutputEl = document.getElementById('journalismGenerateOutput');
+  var journalismBase = '/api/v1/mission-control/journalism-report';
+  var lastEvidencePacketId = null;
+
+  fetch(journalismBase + '/status', {headers: headers})
+    .then(function(res){
+      if (!res.ok) throw new Error('status ' + res.status);
+      return res.json();
+    })
+    .then(function(data){
+      if (!data.available) {
+        journalismDescEl.textContent = 'Unavailable: ' + (data.reason || 'credential not configured') + '. This feature is a no-op until an owner sets CALYX_BACKEND_API_KEY.';
+        return;
+      }
+      journalismDescEl.textContent = 'Connected to the Calyx Backend journalism contract. Presets loading...';
+      journalismBodyEl.style.display = 'block';
+      return fetch(journalismBase + '/presets', {headers: headers})
+        .then(function(res){
+          if (!res.ok) throw new Error('presets ' + res.status);
+          return res.json();
+        })
+        .then(function(presetData){
+          var presets = presetData.presets || [];
+          journalismDescEl.textContent = 'Connected. ' + presets.length + ' preset(s) available from the Calyx Backend.';
+          journalismPresetsListEl.textContent = presets.length
+            ? presets.map(function(p){ return p.preset_id || p.name || JSON.stringify(p); }).join(', ')
+            : 'No presets returned.';
+        });
+    })
+    .catch(function(){
+      journalismDescEl.textContent = 'Journalism Report status check unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+    });
+
+  journalismPreviewBtn.addEventListener('click', function(){
+    journalismPreviewOutputEl.textContent = 'Requesting evidence preview from the real backend...';
+    journalismGenerateBtn.style.display = 'none';
+    lastEvidencePacketId = null;
+    fetch(journalismBase + '/evidence-preview', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json'}, headers),
+      body: JSON.stringify({evidence_items: [], available_dependencies: []})
+    })
+      .then(function(res){ return res.json().then(function(body){ return {ok: res.ok, body: body}; }); })
+      .then(function(result){
+        journalismPreviewOutputEl.textContent = JSON.stringify(result.body, null, 2);
+        if (!result.ok) return;
+        var packet = result.body;
+        var hasEvidence = (packet.verified_projects || []).length > 0 || packet.mode === 'full_continuum';
+        if (hasEvidence && packet.packet_id) {
+          lastEvidencePacketId = packet.packet_id;
+          journalismGenerateBtn.style.display = 'inline-block';
+        }
+      })
+      .catch(function(err){
+        journalismPreviewOutputEl.textContent = 'Evidence preview request failed: ' + err;
+      });
+  });
+
+  journalismGenerateBtn.addEventListener('click', function(){
+    if (!lastEvidencePacketId) return;
+    journalismGenerateOutputEl.textContent = 'Requesting article generation from the real backend...';
+    fetch(journalismBase + '/generate', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json'}, headers),
+      body: JSON.stringify({
+        publication: {publication_id: 'mission-control-panel', publication_name: 'Mission Control Panel', theme: 'orchid-conservation'},
+        brief: {title: 'Operator-triggered report', focus: 'Operator-triggered report from Mission Control'},
+        generation_mode: {mode: 'limited_evidence', unavailable_dependencies: []},
+        evidence_packet_id: lastEvidencePacketId
+      })
+    })
+      .then(function(res){ return res.json().then(function(body){ return {ok: res.ok, body: body}; }); })
+      .then(function(result){
+        journalismGenerateOutputEl.textContent = JSON.stringify(result.body, null, 2);
+      })
+      .catch(function(err){
+        journalismGenerateOutputEl.textContent = 'Generate request failed: ' + err;
+      });
+  });
 })();
 </script>
 </body>
