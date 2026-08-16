@@ -196,6 +196,7 @@ CALYX_BACKEND_TELEMETRY_PATHS = {
     "health": "/api/mission-control/health",
     "harvesters": "/api/mission-control/harvesters",
     "runtime": "/api/mission-control/runtime",
+    "research_readiness": "/api/scientific-intelligence/research-readiness",
 }
 
 
