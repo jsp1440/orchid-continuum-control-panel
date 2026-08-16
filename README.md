@@ -461,3 +461,73 @@ monkeypatched fetch function - no real network call happens during
 `pytest`. The only network-touching functions in the module are `_fetch`
 and `_fetch_json`, exercised for real only when the deployed service
 actually receives a request.
+
+## Journalism Report (`journalism_report.py`)
+
+A thin, read-only-first proxy to `orchid-calyx-backend`'s real journalism
+generation contract (`app/calyx_journalism/routes.py`, mounted at
+`/brain/journalism/...`). This reconstructs the safe part of a stale,
+known-bad PR (#5, "Mission Control Calyx Report" - see
+`jsp1440/Orchid-Continuum-Brain` issue #80) whose "limited mode"
+`build_article()` contained hard-coded scientific/conservation prose that
+was not derived from any evidence object. That code was never merged and
+none of it was reused here. This module never composes, templates, or
+otherwise synthesizes article text itself, in any code path - every
+successful response is the real backend's own JSON, passed through
+unchanged.
+
+```
+GET  /api/v1/mission-control/journalism-report/status
+GET  /api/v1/mission-control/journalism-report/presets
+GET  /api/v1/mission-control/journalism-report/presets/{preset_id}
+POST /api/v1/mission-control/journalism-report/evidence-preview
+GET  /api/v1/mission-control/journalism-report/evidence-packets/{packet_id}
+POST /api/v1/mission-control/journalism-report/generate
+GET  /api/v1/mission-control/journalism-report/articles/{article_id}
+POST /api/v1/mission-control/journalism-report/export/markdown
+```
+
+All routes are gated by `ADMIN_PANEL_TOKEN` like the rest of Mission
+Control, independent of the backend credential below.
+
+### Configuration
+
+| Env var | Required | Purpose |
+|---|---|---|
+| `CALYX_BACKEND_API_KEY` | No | Forwarded as `X-API-Key` to `orchid-calyx-backend`'s `/brain/journalism/*` routes, which require it (or an owner session this service does not have). If unset or blank, every route above **fails closed** with `503 {"available": false, "reason": "CALYX_BACKEND_API_KEY not configured"}` instead of attempting an unauthenticated call or fabricating a report. |
+| `CALYX_BACKEND_JOURNALISM_TIMEOUT_SECONDS` | No | Outbound request timeout in seconds (default `20`). Generation can take longer than a plain health check. |
+
+**As of this feature's addition, `CALYX_BACKEND_API_KEY` is not
+configured in any deployed environment, so this feature is presently a
+no-op in production** - `/status` reports `available: false` and every
+other route returns `503` - until an owner explicitly supplies that
+credential. No credential value is created, guessed, or hard-coded
+anywhere in this repository.
+
+`GET /generate` (`POST` in the real contract) passes through the
+backend's `insufficient_evidence` and `unavailable_dependencies` fields
+unmodified - these are the backend's own honest signals about evidence
+gaps and must never be smoothed over or hidden by this proxy. Backend
+errors (e.g. `404 PRESET_NOT_FOUND`, `404 ARTICLE_NOT_FOUND`) are mirrored
+with the same status code and body the backend returned; if the backend
+is unreachable, the proxy reports `502` with the real connection error,
+never a synthesized success.
+
+The admin landing page (`/admin.html`) adds a "Journalism Report" module:
+it checks `/status` on load, lists presets only if a credential is
+configured, and offers explicit "Build evidence preview" / "Generate"
+buttons - generation is only offered once a real evidence preview comes
+back with verified projects or `full_continuum` mode, and every panel
+renders only the real backend's own JSON, never invented text.
+
+### Testing
+
+`test_journalism_report.py` covers: fail-closed behavior with no
+credential configured (and asserts the network function is never called
+in that case); successful passthrough of every route including
+`insufficient_evidence`/`unavailable_dependencies`; honest error
+passthrough on backend 404s and on an unreachable backend; and static
+guards against ever reintroducing stale PR #5's `build_article()`
+pattern or a hardcoded string return from any route handler. The only
+network-touching function is `_backend_request`, monkeypatched in every
+test - no real network call happens during `pytest`.
