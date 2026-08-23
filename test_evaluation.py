@@ -7,6 +7,7 @@ from evaluation import (
     build_priorities,
     evaluate_collaboration,
     evaluate_engineering,
+    evaluate_delivery_governance,
     evaluate_mission_progress,
     evaluate_scientific,
     run_evaluation,
@@ -19,7 +20,7 @@ def _now():
 
 def _empty_state():
     return {
-        "decisions": [], "relationships": [], "agents": [], "tasks": [],
+        "decisions": [], "relationships": [], "links": [], "agents": [], "tasks": [],
         "findings": [], "outbox": [], "taxonomy_coverage": None,
     }
 
@@ -133,6 +134,45 @@ def test_mission_progress_surfaces_accepted_as_opportunity_and_under_review_as_b
     assert severities["d2"] == "blocker"
 
 
+# ---------- evaluate_delivery_governance ----------
+
+def test_delivery_governance_no_implemented_decisions_returns_null():
+    result = evaluate_delivery_governance(_empty_state())
+    assert result["score"] is None
+    assert result["counts"]["implemented_decisions"] == 0
+    assert "token and deployment cost per verified outcome" in result["data_coverage"]["not_yet_monitored"]
+
+
+def test_delivery_governance_measures_only_qualifying_implementation_links():
+    state = _empty_state()
+    state["decisions"] = [
+        {"decision_id": "linked", "title": "Linked", "status": "implemented"},
+        {"decision_id": "unlinked", "title": "Unlinked", "status": "implemented"},
+        {"decision_id": "proposed", "title": "Proposed", "status": "proposed"},
+    ]
+    state["links"] = [
+        {"decision_id": "linked", "link_type": "pull_request", "link_ref": "#123"},
+        {"decision_id": "unlinked", "link_type": "external_url", "link_ref": "https://example.test"},
+    ]
+    result = evaluate_delivery_governance(state)
+    assert result["score"] == 50
+    assert result["counts"] == {
+        "implemented_decisions": 2,
+        "with_implementation_evidence": 1,
+        "missing_implementation_evidence": 1,
+    }
+    assert [signal["id"] for signal in result["signals"]] == ["unlinked"]
+
+
+def test_delivery_governance_does_not_claim_links_prove_delivery():
+    state = _empty_state()
+    state["decisions"] = [{"decision_id": "d1", "title": "A", "status": "implemented"}]
+    state["links"] = [{"decision_id": "d1", "link_type": "commit", "link_ref": "abc"}]
+    result = evaluate_delivery_governance(state)
+    assert result["score"] == 100
+    assert "does not prove merge" in result["interpretation_limit"]
+
+
 # ---------- evaluate_collaboration ----------
 
 def test_collaboration_always_null_never_fabricated():
@@ -190,4 +230,6 @@ def test_build_priorities_assigns_real_agent_key_from_finding():
 def test_run_evaluation_empty_state_has_no_priorities():
     result = run_evaluation(_empty_state())
     assert result["priorities"] == []
-    assert set(result["domain_scores"].keys()) == {"engineering", "scientific", "mission_progress", "collaboration"}
+    assert set(result["domain_scores"].keys()) == {
+        "engineering", "scientific", "mission_progress", "delivery_governance", "collaboration"
+    }
