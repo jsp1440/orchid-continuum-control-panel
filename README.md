@@ -288,6 +288,7 @@ number):
 | Engineering | Engineering Health Score | Open findings, failed agent runs, failed Brain Outbox syncs, stale decision reviews |
 | Scientific | Scientific Opportunity Score | Taxonomy/image coverage (`orchid_taxonomy`/`images`, if present) - literature/pollinator/mycorrhiza/conservation gaps have **no data source yet** and are reported as such, not estimated |
 | Mission Progress | Mission Progress Score | Engineering Memory decision lifecycle status and relationships |
+| Delivery Governance | Implementation Evidence Yield | Implemented Engineering Memory decisions and their linked commits/PRs/releases/documents/tasks |
 | Collaboration | Collaboration Opportunity Score | **No data source exists anywhere in this repository** - always reports `score: null`, never a fabricated number |
 
 **Priority ranking**: every signal from every domain becomes a ranked
