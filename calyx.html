@@ -2,278 +2,478 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Orchid Continuum - Calyx</title>
+  <!-- Mobile/iPad-first: cover the notch/safe areas, lock zoom-scaling behaviour to a readable baseline. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Orchid Continuum — Calyx</title>
+  <!--
+    OWNER-CALYX-MOBILE-001 (control-panel issue #11) — first executable slice.
+
+    This is the mobile/iPad-first owner conversation shell for Calyx. It is a
+    thin, honest client over the EXISTING canonical Calyx conversation path in
+    calyx.py (`GET /api/v1/calyx/mission-brief`, `POST /api/v1/calyx/ask`) — it
+    does NOT introduce a second Calyx or a second Mission Control architecture,
+    and it holds no model keys: every answer is synthesized server-side from
+    real institutional state.
+
+    What this slice deliberately does and does not claim:
+      * Multi-turn conversation experience with a persistent session identity
+        (the transcript + session id live in this browser; each turn is
+        grounded by a real server call).
+      * Live read of current Continuum state (lanes / blockers / module status /
+        next action) through the governed brief API.
+      * Deep-links from a cited answer into the relevant control-panel module,
+        carrying only bounded `type:id` focus context.
+      * Truthful DEGRADED / UNAVAILABLE / AUTH-REQUIRED states — when a backend
+        capability is not reachable it says so and shows nothing fabricated.
+      * It does NOT claim live scientific/evidence integration; those governed
+        capabilities light up only when their real backend contracts pass.
+  -->
   <style>
-    :root {
+    :root{
       --bg:#081120;--panel:#111b31;--panel2:#16223c;--text:#edf3ff;--muted:#b2bfdc;
       --border:#2a3755;--blue:#5aa2ff;--card:#0f172a;--radius:16px;
-      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;
+      --ok:#3ddc97;--warn:#f5c451;--err:#ff6b81;--owner:#1d2a49;--calyx:#12203b;
+      --tap:44px;
     }
-    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#07111f 0%,#0b1630 100%);color:var(--text)}
-    .wrap{max-width:1100px;margin:0 auto;padding:28px}
-    .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
-    .topbar h1{margin:0;font-size:30px}
-    .subtitle{color:var(--muted);font-size:14px;margin:8px 0 22px}
-    .back-link{text-decoration:none;color:var(--text);background:var(--panel);border:1px solid var(--border);padding:12px 16px;border-radius:12px}
-    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
-    .panel h2{margin:0 0 12px;font-size:19px}
-    .counts-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:22px}
-    @media(max-width:900px){.counts-strip{grid-template-columns:repeat(3,1fr)}}
-    .count-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}
-    .count-value{font-size:22px;font-weight:800}
-    .count-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
-    .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    @media(max-width:800px){.cols{grid-template-columns:1fr}}
-    .item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;font-size:13px}
-    .item-summary{margin-bottom:2px}
-    .item-meta{color:var(--muted);font-size:11px}
-    .empty{color:var(--muted);font-size:13px}
-    .next-action{background:var(--card);border:1px solid var(--blue);border-radius:12px;padding:14px}
-    .next-action-summary{font-weight:700;margin-bottom:6px}
-    .next-action-meta{color:var(--muted);font-size:12px}
-    textarea,input{width:100%;padding:10px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit}
-    button{margin-top:10px;padding:10px 16px;border-radius:10px;border:none;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}
-    button:disabled{opacity:.6;cursor:not-allowed}
-    .answer{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:#13203a;font-size:13px;white-space:pre-wrap;line-height:1.6}
-    .example-qs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-    .example-qs button{margin-top:0;padding:6px 10px;font-size:12px;background:var(--panel2);color:var(--text);border:1px solid var(--border)}
-    .scores-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
-    @media(max-width:800px){.scores-strip{grid-template-columns:repeat(2,1fr)}}
-    .score-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
-    .score-value{font-size:26px;font-weight:800}
-    .score-value.null{color:var(--muted);font-size:16px}
-    .score-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
-    .score-note{font-size:10px;color:var(--muted);margin-top:4px}
-    .priority-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;font-size:13px}
-    .priority-rank{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:12px;margin-right:6px}
-    .priority-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;margin-left:6px}
-    .priority-badge.critical{background:var(--err);color:#3a0a10}
-    .priority-badge.high{background:var(--warn);color:#3a2a04}
-    .priority-badge.medium,.priority-badge.low{background:#2a3755;color:var(--text)}
-    .priority-meta{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.6}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;background:var(--bg);color:var(--text);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      font-size:16px;line-height:1.6;
+      display:flex;flex-direction:column;height:100dvh;
+      -webkit-text-size-adjust:100%;
+    }
+    a{color:var(--blue)}
+    /* ---- Header ---- */
+    .appbar{
+      display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+      padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+      background:linear-gradient(180deg,#0b1630,#081120);border-bottom:1px solid var(--border);
+      position:sticky;top:0;z-index:20;
+    }
+    .appbar h1{margin:0;font-size:20px;letter-spacing:.02em}
+    .appbar .who{color:var(--muted);font-size:12px}
+    .spacer{flex:1 1 auto}
+    .status-pill{
+      display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+      padding:6px 10px;border-radius:999px;border:1px solid var(--border);background:var(--panel);
+    }
+    .status-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+    .status-pill[data-state="live"] .dot{background:var(--ok)}
+    .status-pill[data-state="degraded"] .dot{background:var(--warn)}
+    .status-pill[data-state="unavailable"] .dot,.status-pill[data-state="auth"] .dot{background:var(--err)}
+    .bar-btn{
+      min-height:var(--tap);min-width:var(--tap);padding:8px 12px;border-radius:12px;cursor:pointer;
+      border:1px solid var(--border);background:var(--panel);color:var(--text);font-weight:700;font-size:13px;
+    }
+    /* ---- Layout: conversation + governed-state drawer ---- */
+    .main{flex:1 1 auto;display:flex;min-height:0}
+    .conversation{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
+    .transcript{
+      flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;
+      padding:16px;display:flex;flex-direction:column;gap:12px;
+      width:100%;max-width:760px;margin:0 auto;
+    }
+    .banner{
+      border:1px solid var(--border);border-radius:12px;padding:12px 14px;font-size:14px;background:var(--panel);
+    }
+    .banner.degraded{border-color:var(--warn);background:#241f10}
+    .banner.unavailable,.banner.auth{border-color:var(--err);background:#2a1116}
+    .turn{display:flex;flex-direction:column;max-width:100%}
+    .turn .role{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 4px 4px}
+    .bubble{
+      padding:12px 14px;border-radius:16px;border:1px solid var(--border);
+      white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;
+    }
+    .turn.owner{align-items:flex-end}
+    .turn.owner .bubble{background:var(--owner);border-color:#2c3f6b;border-bottom-right-radius:6px;max-width:88%}
+    .turn.calyx{align-items:flex-start}
+    .turn.calyx .bubble{background:var(--calyx);border-bottom-left-radius:6px;max-width:92%}
+    .turn.calyx .bubble.blocked{border-color:var(--err)}
+    .cites{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .cite{
+      display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:4px 10px;border-radius:999px;
+      font-size:12px;text-decoration:none;color:var(--text);background:var(--panel2);border:1px solid var(--border);
+    }
+    .epistemic{margin-top:8px;font-size:11px;color:var(--muted)}
+    .epistemic .tag{display:inline-block;border:1px solid var(--border);border-radius:6px;padding:1px 6px;margin-right:6px}
+    /* ---- Composer ---- */
+    .composer{
+      border-top:1px solid var(--border);background:var(--panel);
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    }
+    .composer .row{display:flex;gap:8px;align-items:flex-end;max-width:760px;margin:0 auto}
+    .composer textarea{
+      flex:1 1 auto;resize:none;min-height:var(--tap);max-height:140px;padding:11px 12px;
+      background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:14px;
+      font-size:16px;font-family:inherit;line-height:1.4;
+    }
+    .send{
+      min-height:var(--tap);min-width:var(--tap);padding:0 18px;border:none;border-radius:14px;
+      background:var(--blue);color:#fff;font-weight:800;font-size:15px;cursor:pointer;
+    }
+    .send:disabled{opacity:.5;cursor:not-allowed}
+    .suggestions{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;max-width:760px;margin:0 auto;-webkit-overflow-scrolling:touch}
+    .suggestions button{
+      flex:0 0 auto;min-height:36px;padding:6px 12px;border-radius:999px;white-space:nowrap;
+      background:var(--panel2);color:var(--text);border:1px solid var(--border);font-size:13px;cursor:pointer;
+    }
+    /* ---- Governed-state drawer ---- */
+    .drawer{
+      width:340px;flex:0 0 340px;border-left:1px solid var(--border);background:var(--panel);
+      overflow-y:auto;padding:16px;
+    }
+    .drawer h2{font-size:15px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+    .counts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+    .count-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
+    .count-value{font-size:20px;font-weight:800}
+    .count-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+    .plan{background:var(--card);border:1px solid var(--blue);border-radius:12px;padding:12px;margin-bottom:16px}
+    .plan .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+    .plan .governed{margin-top:8px;font-size:11px;color:var(--warn)}
+    .lane{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:6px;font-size:13px}
+    .lane .lane-meta{color:var(--muted);font-size:11px;margin-top:2px}
+    .lane.crit{border-color:var(--err)}
+    .drawer-empty{color:var(--muted);font-size:13px}
+    .drawer-unavailable{border:1px solid var(--err);border-radius:12px;padding:12px;color:var(--muted);font-size:13px;background:#2a1116}
+    /* backdrop only used on narrow screens */
+    .backdrop{display:none}
+    /* ---- Phone: drawer becomes a bottom sheet ---- */
+    @media (max-width:820px){
+      .drawer{
+        position:fixed;top:0;right:0;height:100dvh;z-index:40;transform:translateX(100%);
+        transition:transform .2s ease;box-shadow:-12px 0 40px rgba(0,0,0,.5);width:min(360px,92vw);flex-basis:auto;
+        padding-top:calc(16px + env(safe-area-inset-top));
+      }
+      body.drawer-open .drawer{transform:translateX(0)}
+      body.drawer-open .backdrop{display:block;position:fixed;inset:0;background:rgba(2,6,16,.55);z-index:35}
+    }
+    @media (min-width:821px){ .drawer-toggle{display:none} }
+    @media (prefers-reduced-motion:reduce){ .drawer{transition:none} }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="topbar">
-      <h1>Calyx</h1>
-      <a class="back-link" id="backLink" href="/admin.html">Back to Mission Control</a>
-    </div>
-    <div class="subtitle">Mission Control is Calyx's workspace. Phase Alpha: read-only observation, analysis, and recommendation - no automatic execution, deployment, or self-approval.</div>
+  <header class="appbar">
+    <h1>Calyx</h1>
+    <span class="who" id="whoLine">owner conversation</span>
+    <span class="spacer"></span>
+    <span class="status-pill" id="statusPill" data-state="loading"><span class="dot"></span><span id="statusText">connecting…</span></span>
+    <button class="bar-btn drawer-toggle" id="drawerToggle" type="button" aria-expanded="false">System state</button>
+    <button class="bar-btn" id="newSessionBtn" type="button" title="Start a new conversation">New</button>
+  </header>
 
-    <div id="countsStrip" class="counts-strip"></div>
-    <div id="scoresStrip" class="scores-strip"></div>
+  <div class="main">
+    <section class="conversation" aria-label="Calyx conversation">
+      <div class="transcript" id="transcript" role="log" aria-live="polite"></div>
+      <div class="composer">
+        <div class="suggestions" id="suggestions">
+          <button type="button" data-q="Where are we with the Orchid Continuum?">Where are we?</button>
+          <button type="button" data-q="What should we work on today?">Today's priorities</button>
+          <button type="button" data-q="What is blocking progress?">What's blocking?</button>
+          <button type="button" data-q="What changed since yesterday?">What changed?</button>
+          <button type="button" data-q="What systems are unhealthy?">Anything unhealthy?</button>
+          <button type="button" data-q="What is closest to completion?">Closest to done?</button>
+        </div>
+        <div class="row">
+          <textarea id="composerInput" rows="1" inputmode="text" enterkeyhint="send"
+            placeholder="Ask Calyx about the Orchid Continuum…" aria-label="Message to Calyx"></textarea>
+          <button class="send" id="sendBtn" type="button">Send</button>
+        </div>
+      </div>
+    </section>
 
-    <div class="panel">
-      <h2>Priorities</h2>
-      <button id="evaluateBtn" type="button">Evaluate Now</button>
-      <div id="evaluateMsg" class="msg"></div>
-      <div id="prioritiesList" style="margin-top:12px"><div class="empty">Click "Evaluate Now" to rank current priorities.</div></div>
-    </div>
-
-    <div class="panel">
-      <h2>Ask Calyx</h2>
-      <textarea id="questionInput" rows="2" placeholder="What should we work on today?"></textarea>
-      <div class="example-qs">
-        <button type="button" data-q="What should we work on today?">Work on today?</button>
-        <button type="button" data-q="What is blocking progress?">Blocking?</button>
-        <button type="button" data-q="What changed since yesterday?">Changed?</button>
-        <button type="button" data-q="What engineering decisions are still unresolved?">Unresolved decisions?</button>
-        <button type="button" data-q="What systems are unhealthy?">Unhealthy?</button>
-        <button type="button" data-q="What is closest to completion?">Closest to completion?</button>
-      </div>
-      <button id="askBtn" type="button">Ask</button>
-      <div id="answerBox" class="answer" style="display:none"></div>
-    </div>
-
-    <div class="panel">
-      <h2>Next Action</h2>
-      <div id="nextAction"><div class="empty">Loading...</div></div>
-    </div>
-
-    <div class="cols">
-      <div class="panel">
-        <h2>Healthy</h2>
-        <div id="healthyList"><div class="empty">Loading...</div></div>
-      </div>
-      <div class="panel">
-        <h2>Broken</h2>
-        <div id="brokenList"><div class="empty">Loading...</div></div>
-      </div>
-      <div class="panel">
-        <h2>Blocked</h2>
-        <div id="blockedList"><div class="empty">Loading...</div></div>
-      </div>
-      <div class="panel">
-        <h2>Waiting for Review</h2>
-        <div id="reviewList"><div class="empty">Loading...</div></div>
-      </div>
-      <div class="panel">
-        <h2>Closest to Completion</h2>
-        <div id="closestList"><div class="empty">Loading...</div></div>
-      </div>
-      <div class="panel">
-        <h2>Recent Changes (24h)</h2>
-        <div id="recentList"><div class="empty">Loading...</div></div>
-      </div>
-    </div>
+    <aside class="drawer" id="drawer" aria-label="Governed Continuum state">
+      <h2>Continuum state</h2>
+      <div id="drawerBody"><div class="drawer-empty">Loading governed state…</div></div>
+    </aside>
+    <div class="backdrop" id="backdrop"></div>
   </div>
 
 <script>
 (function(){
-  function esc(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  "use strict";
 
-  var ADMIN_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
-  (function(){
-    var backLink = document.getElementById('backLink');
-    if (backLink && ADMIN_TOKEN) {
-      var url = new URL(backLink.href, window.location.origin);
-      url.searchParams.set('token', ADMIN_TOKEN);
-      backLink.href = url.pathname + url.search;
+  // ---------------------------------------------------------------------------
+  // Config + tiny helpers
+  // ---------------------------------------------------------------------------
+  var SESSION_KEY = "oc.calyx.session.v1";
+  var API = {
+    brief: "/api/v1/calyx/mission-brief",
+    ask: "/api/v1/calyx/ask"
+  };
+  // Map a citation subject type to the control-panel module that owns it, so a
+  // cited answer can deep-link into the right workspace carrying ONLY bounded
+  // focus context (type:id) — never evidence payloads.
+  var MODULE_FOR_TYPE = {
+    decision: "engineering-memory.html",
+    finding:  "admin.html",
+    task:     "agents.html",
+    agent:    "agents.html",
+    outbox:   "admin.html"
+  };
+
+  function esc(v){ return (v==null?"":String(v)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  function $(id){ return document.getElementById(id); }
+  function uuid(){
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
+    return "sess-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
+  }
+
+  var ADMIN_TOKEN = "";
+  try { ADMIN_TOKEN = new URLSearchParams(window.location.search).get("token") || ""; } catch(e){ ADMIN_TOKEN = ""; }
+
+  // ---------------------------------------------------------------------------
+  // Persistent multi-turn session identity (this browser owns the transcript;
+  // each turn is still grounded by a real server call).
+  // ---------------------------------------------------------------------------
+  var session = loadSession();
+
+  function loadSession(){
+    try {
+      var raw = window.localStorage.getItem(SESSION_KEY);
+      if (raw){
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.sessionId && Array.isArray(parsed.turns)) return parsed;
+      }
+    } catch(e){ /* private mode / disabled storage — fall through to ephemeral */ }
+    return { sessionId: uuid(), startedAt: new Date().toISOString(), turns: [] };
+  }
+  function saveSession(){
+    try { window.localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch(e){ /* ephemeral only */ }
+  }
+  function resetSession(){
+    session = { sessionId: uuid(), startedAt: new Date().toISOString(), turns: [] };
+    saveSession(); renderTranscript();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Connection status
+  // ---------------------------------------------------------------------------
+  function setStatus(state, text){
+    var pill = $("statusPill");
+    pill.setAttribute("data-state", state);
+    $("statusText").textContent = text;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Citations: turn "[type:id]" tokens in a grounded answer into bounded
+  // deep-links into the owning module. Non-citation text is escaped.
+  // ---------------------------------------------------------------------------
+  var CITE_RE = /\[([a-z_]+):([^\]\s]+)\]/gi;
+  function withTitle(){ return ADMIN_TOKEN ? ("&token=" + encodeURIComponent(ADMIN_TOKEN)) : ""; }
+  function moduleHref(type, id){
+    var page = MODULE_FOR_TYPE[String(type).toLowerCase()];
+    if (!page) return null;
+    return page + "?focus=" + encodeURIComponent(type + ":" + id) + withTitle();
+  }
+  function renderAnswerHtml(text){
+    var out = "", last = 0, m;
+    CITE_RE.lastIndex = 0;
+    while ((m = CITE_RE.exec(text)) !== null){
+      out += esc(text.slice(last, m.index));
+      var href = moduleHref(m[1], m[2]);
+      var label = esc("[" + m[1] + ":" + m[2] + "]");
+      out += href
+        ? '<a class="cite" href="' + esc(href) + '">' + label + "</a>"
+        : label;
+      last = m.index + m[0].length;
     }
-  })();
+    out += esc(text.slice(last));
+    return out;
+  }
 
+  // ---------------------------------------------------------------------------
+  // Transcript rendering
+  // ---------------------------------------------------------------------------
+  function renderTranscript(){
+    var el = $("transcript");
+    var html = "";
+
+    if (!ADMIN_TOKEN){
+      html += '<div class="banner auth">Sign-in required. Open this page from Mission Control with your admin token so Calyx can read governed Continuum state on your behalf. Nothing is fabricated while unauthenticated.</div>';
+    } else if (!session.turns.length){
+      html += '<div class="banner">Ask Calyx where the Orchid Continuum is, what is blocking progress, or what to work on next. Answers are grounded in current institutional state and cite the records they came from.</div>';
+    }
+
+    for (var i=0;i<session.turns.length;i++){
+      var t = session.turns[i];
+      if (t.role === "owner"){
+        html += '<div class="turn owner"><div class="role">You</div><div class="bubble">' + esc(t.text) + "</div></div>";
+      } else {
+        var cls = "bubble" + (t.state === "blocked" || t.state === "unavailable" ? " blocked" : "");
+        var body = (t.state === "blocked" || t.state === "unavailable")
+          ? esc(t.text)
+          : renderAnswerHtml(t.text);
+        var ep = t.epistemic
+          ? '<div class="epistemic"><span class="tag">' + esc(t.epistemic) + "</span>" +
+            (t.matched_intent ? "intent: " + esc(t.matched_intent) : "") + "</div>"
+          : "";
+        html += '<div class="turn calyx"><div class="role">Calyx</div><div class="' + cls + '">' + body + "</div>" + ep + "</div>";
+      }
+    }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function pushTurn(turn){ session.turns.push(turn); saveSession(); renderTranscript(); }
+
+  // ---------------------------------------------------------------------------
+  // API
+  // ---------------------------------------------------------------------------
   async function api(path, opts){
     opts = opts || {};
-    opts.headers = Object.assign({}, opts.headers || {}, ADMIN_TOKEN ? {'Authorization': 'Bearer ' + ADMIN_TOKEN} : {});
+    opts.headers = Object.assign({}, opts.headers || {}, ADMIN_TOKEN ? { "Authorization": "Bearer " + ADMIN_TOKEN } : {});
     var res = await fetch(path, opts);
     var text = await res.text();
-    var data;
-    try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
-    if (!res.ok) throw new Error((data && data.detail) ? data.detail : ('HTTP ' + res.status));
+    var data = null;
+    try { data = text ? JSON.parse(text) : null; } catch(e){ data = null; }
+    if (!res.ok){
+      var err = new Error((data && data.detail) ? data.detail : ("HTTP " + res.status));
+      err.status = res.status;
+      throw err;
+    }
     return data;
   }
 
-  function renderList(el, items, formatter){
-    if (!items || !items.length) { el.innerHTML = '<div class="empty">None.</div>'; return; }
-    el.innerHTML = items.map(formatter).join('');
-  }
+  // ---------------------------------------------------------------------------
+  // Ask Calyx (a conversation turn)
+  // ---------------------------------------------------------------------------
+  var busy = false;
+  async function ask(question){
+    question = (question || "").trim();
+    if (!question || busy) return;
+    if (!ADMIN_TOKEN){ renderTranscript(); return; }
+    busy = true; $("sendBtn").disabled = true;
+    pushTurn({ role:"owner", text:question, ts:new Date().toISOString() });
+    var pending = { role:"calyx", text:"…", ts:new Date().toISOString(), state:"pending" };
+    session.turns.push(pending); renderTranscript();
 
-  function itemHtml(i){
-    return '<div class="item"><div class="item-summary">' + esc(i.summary) + '</div>' +
-      '<div class="item-meta">' + esc(i.type) + ':' + esc(i.id) + (i.status ? ' &middot; ' + esc(i.status) : '') + '</div></div>';
-  }
-
-  function renderScores(domainScores){
-    var order = ['engineering', 'scientific', 'mission_progress', 'collaboration'];
-    document.getElementById('scoresStrip').innerHTML = order.map(function(key){
-      var d = domainScores[key];
-      var valueHtml = (d.score === null || d.score === undefined)
-        ? '<div class="score-value null">No data</div>'
-        : '<div class="score-value">' + esc(d.score) + '</div>';
-      return '<div class="score-box">' + valueHtml +
-        '<div class="score-label">' + esc(d.label) + '</div>' +
-        '<div class="score-note">' + esc(d.data_coverage.not_yet_monitored.length) + ' signal type(s) not yet monitored</div></div>';
-    }).join('');
-  }
-
-  function renderPriorities(priorities){
-    var el = document.getElementById('prioritiesList');
-    if (!priorities.length) { el.innerHTML = '<div class="empty">No priorities - all tracked signals are currently clear.</div>'; return; }
-    el.innerHTML = priorities.map(function(p){
-      return '<div class="priority-item">' +
-        '<span class="priority-rank">' + esc(p.rank) + '</span>' +
-        '<strong>' + esc(p.domain) + '</strong>' +
-        '<span class="priority-badge ' + esc(p.priority) + '">' + esc(p.priority) + '</span>' +
-        '<div style="margin-top:6px">' + esc(p.reason) + '</div>' +
-        '<div class="priority-meta">' +
-          'Impact: ' + esc(p.expected_impact) + '<br>' +
-          'Agent: ' + esc(p.suggested_agent || 'none - human review') +
-          ' &middot; Tool: ' + esc(p.suggested_tool || 'none - human judgment') +
-          ' &middot; Confidence: ' + esc(p.confidence) + '<br>' +
-          'Dependencies: ' + esc(p.dependencies.length ? p.dependencies.join(', ') : 'none identified') +
-          ' &middot; Evidence: ' + esc(p.evidence.type) + ':' + esc(p.evidence.id) +
-        '</div></div>';
-    }).join('');
-  }
-
-  async function loadBrief(){
     try {
-      var brief = await api('/api/v1/calyx/mission-brief');
-
-      var c = brief.counts;
-      document.getElementById('countsStrip').innerHTML = [
-        ['Decisions', c.decisions_total],
-        ['Under Review', c.decisions_under_review],
-        ['Findings Open', c.findings_open],
-        ['Critical', c.findings_critical],
-        ['Failed Tasks', c.tasks_failed],
-        ['Agents', c.agents_enabled + '/' + c.agents_total]
-      ].map(function(pair){
-        return '<div class="count-box"><div class="count-value">' + esc(pair[1]) + '</div><div class="count-label">' + esc(pair[0]) + '</div></div>';
-      }).join('');
-
-      renderScores(brief.domain_scores);
-      renderPriorities(brief.priorities);
-
-      var na = brief.next_action;
-      document.getElementById('nextAction').innerHTML =
-        '<div class="next-action"><div class="next-action-summary">' + esc(na.summary) + '</div>' +
-        '<div class="next-action-meta">' + (na.assigned_agent ? 'Agent: ' + esc(na.assigned_agent) : 'Requires human review - no agent assigned') +
-        ' &middot; ' + esc(na.reason) + '</div></div>';
-
-      renderList(document.getElementById('healthyList'), brief.healthy.map(function(s){return {summary:s,type:'ok',id:''}}),
-        function(i){ return '<div class="item"><div class="item-summary">' + esc(i.summary) + '</div></div>'; });
-      renderList(document.getElementById('brokenList'), brief.broken, itemHtml);
-      renderList(document.getElementById('blockedList'), brief.blocked, itemHtml);
-      renderList(document.getElementById('reviewList'), brief.waiting_for_review, itemHtml);
-      renderList(document.getElementById('closestList'), brief.closest_to_completion, itemHtml);
-      renderList(document.getElementById('recentList'), brief.recent_changes, itemHtml);
-    } catch(e) {
-      document.getElementById('nextAction').innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
-    }
-  }
-
-  async function askQuestion(question){
-    var box = document.getElementById('answerBox');
-    var btn = document.getElementById('askBtn');
-    btn.disabled = true;
-    box.style.display = 'block';
-    box.textContent = 'Thinking...';
-    try {
-      var res = await api('/api/v1/calyx/ask', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({question: question})
+      var res = await api(API.ask, {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ question: question, session_id: session.sessionId })
       });
-      box.textContent = res.answer;
-    } catch(e) {
-      box.textContent = 'Failed: ' + e.message;
+      pending.text = (res && res.answer) ? res.answer : "No answer returned.";
+      pending.matched_intent = res && res.matched_intent;
+      pending.state = "answered";
+      // Calyx's answers are synthesized recommendations over cited records, not
+      // direct experimental evidence — label the epistemic status honestly.
+      pending.epistemic = "grounded synthesis over cited records";
+      saveSession(); renderTranscript();
+      setStatus("live", "live");
+    } catch(e){
+      // Never fabricate an answer: show a truthful BLOCKED/UNAVAILABLE turn.
+      var unreachable = !e.status || e.status >= 500 || e.status === 0;
+      pending.state = unreachable ? "unavailable" : "blocked";
+      pending.text = unreachable
+        ? "UNAVAILABLE — the governed Calyx conversation service could not be reached (" + e.message + "). No answer is being fabricated. Retry once the backend capability is live."
+        : "BLOCKED — " + e.message;
+      saveSession(); renderTranscript();
+      setStatus(unreachable ? "unavailable" : "degraded", unreachable ? "unavailable" : "degraded");
+    } finally {
+      busy = false; $("sendBtn").disabled = false;
     }
-    btn.disabled = false;
   }
 
-  document.getElementById('askBtn').addEventListener('click', function(){
-    var q = document.getElementById('questionInput').value.trim();
-    if (q) askQuestion(q);
-  });
-  document.querySelectorAll('[data-q]').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var q = btn.getAttribute('data-q');
-      document.getElementById('questionInput').value = q;
-      askQuestion(q);
-    });
-  });
-
-  document.getElementById('evaluateBtn').addEventListener('click', async function(){
-    var btn = this;
-    var msg = document.getElementById('evaluateMsg');
-    btn.disabled = true;
-    msg.textContent = 'Evaluating...'; msg.className = 'msg';
-    try {
-      var result = await api('/api/v1/calyx/evaluate', {method: 'POST'});
-      renderScores(result.domain_scores);
-      renderPriorities(result.priorities);
-      var created = result.proposed_decisions_created.length;
-      msg.textContent = created
-        ? created + ' new Engineering Memory decision(s) proposed for review (' + result.proposed_decisions_skipped_existing + ' already existed).'
-        : 'No new decisions proposed (' + result.proposed_decisions_skipped_existing + ' already existed for current top items).';
-      msg.className = 'msg ok';
-    } catch(e) {
-      msg.textContent = 'Evaluate failed: ' + e.message; msg.className = 'msg error';
+  // ---------------------------------------------------------------------------
+  // Governed-state drawer (lanes / blockers / module status / plan)
+  // ---------------------------------------------------------------------------
+  function planHtml(brief){
+    var p = brief.top_priority || null;
+    var na = brief.next_action || null;
+    if (p){
+      return '<div class="plan"><div class="k">Proposed next plan</div>' +
+        "<div><strong>" + esc(p.domain) + "</strong> — " + esc(p.reason) + "</div>" +
+        '<div class="lane-meta" style="margin-top:6px">Impact: ' + esc(p.expected_impact) + "<br>" +
+        "Role/agent: " + esc(p.suggested_agent || "none — human review") +
+        " · Confidence: " + esc(p.confidence) +
+        (p.evidence ? "<br>Evidence: " + esc(p.evidence.type) + ":" + esc(p.evidence.id) : "") + "</div>" +
+        '<div class="governed">Execution stays governed by backend authority checks — this is a recommendation, not an approval.</div></div>';
     }
-    btn.disabled = false;
+    if (na){
+      return '<div class="plan"><div class="k">Recommended next action</div><div>' + esc(na.summary) + "</div>" +
+        '<div class="lane-meta" style="margin-top:6px">' + (na.assigned_agent ? "Agent: " + esc(na.assigned_agent) : "Requires human review — no agent assigned") + "</div>" +
+        '<div class="governed">Recommendation only — execution stays governed by backend authority checks.</div></div>';
+    }
+    return "";
+  }
+  function laneHtml(items, kind){
+    if (!items || !items.length) return '<div class="drawer-empty">None.</div>';
+    return items.map(function(i){
+      var crit = (kind === "broken") ? " crit" : "";
+      return '<div class="lane' + crit + '"><div>' + esc(i.summary) + "</div>" +
+        '<div class="lane-meta">' + esc(i.type) + ":" + esc(i.id) + (i.severity ? " · " + esc(i.severity) : "") + (i.status ? " · " + esc(i.status) : "") + "</div></div>";
+    }).join("");
+  }
+  async function loadBrief(){
+    var body = $("drawerBody");
+    if (!ADMIN_TOKEN){
+      body.innerHTML = '<div class="drawer-unavailable">AUTH REQUIRED — governed state is only read with your admin token. Nothing shown here is fabricated.</div>';
+      setStatus("auth", "sign-in required");
+      return;
+    }
+    try {
+      var brief = await api(API.brief);
+      var c = brief.counts || {};
+      var counts = [
+        ["Decisions", c.decisions_total], ["Under review", c.decisions_under_review],
+        ["Findings", c.findings_open], ["Critical", c.findings_critical],
+        ["Failed tasks", c.tasks_failed], ["Agents", (c.agents_enabled==null?"—":c.agents_enabled) + "/" + (c.agents_total==null?"—":c.agents_total)]
+      ].map(function(p){ return '<div class="count-box"><div class="count-value">' + esc(p[1]==null?"—":p[1]) + '</div><div class="count-label">' + esc(p[0]) + "</div></div>"; }).join("");
+
+      body.innerHTML =
+        '<div class="counts">' + counts + "</div>" +
+        planHtml(brief) +
+        "<h2>Broken</h2>" + laneHtml(brief.broken, "broken") +
+        '<h2 style="margin-top:14px">Blocked</h2>' + laneHtml(brief.blocked, "blocked") +
+        '<h2 style="margin-top:14px">Waiting for review</h2>' + laneHtml(brief.waiting_for_review, "review") +
+        '<h2 style="margin-top:14px">Recent changes (24h)</h2>' + laneHtml(brief.recent_changes, "recent");
+      setStatus("live", "live");
+    } catch(e){
+      var unreachable = !e.status || e.status >= 500 || e.status === 0;
+      body.innerHTML = '<div class="drawer-unavailable">' +
+        (unreachable ? "UNAVAILABLE" : "DEGRADED") + " — governed Continuum state could not be loaded (" + esc(e.message) +
+        "). Nothing is being fabricated; this panel stays empty until the brief API is reachable.</div>";
+      setStatus(unreachable ? "unavailable" : "degraded", unreachable ? "unavailable" : "degraded");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wiring
+  // ---------------------------------------------------------------------------
+  var input = $("composerInput");
+  function autoGrow(){ input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; }
+  input.addEventListener("input", autoGrow);
+  input.addEventListener("keydown", function(e){
+    if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); submit(); }
+  });
+  function submit(){
+    var q = input.value.trim();
+    if (!q) return;
+    input.value = ""; autoGrow();
+    ask(q);
+  }
+  $("sendBtn").addEventListener("click", submit);
+  Array.prototype.forEach.call(document.querySelectorAll("[data-q]"), function(btn){
+    btn.addEventListener("click", function(){ input.value = btn.getAttribute("data-q"); submit(); });
+  });
+  $("newSessionBtn").addEventListener("click", function(){
+    resetSession(); input.focus();
   });
 
+  function toggleDrawer(force){
+    var open = force==null ? !document.body.classList.contains("drawer-open") : force;
+    document.body.classList.toggle("drawer-open", open);
+    $("drawerToggle").setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  $("drawerToggle").addEventListener("click", function(){ toggleDrawer(); });
+  $("backdrop").addEventListener("click", function(){ toggleDrawer(false); });
+
+  $("whoLine").textContent = "session " + session.sessionId.slice(0,8);
+
+  renderTranscript();
   loadBrief();
 })();
 </script>
