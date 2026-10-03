@@ -116,3 +116,15 @@ def test_operational_status_does_not_expose_internal_errors(monkeypatch):
 
     assert error.value.status_code == 500
     assert error.value.detail == "Operational status failed"
+
+
+def test_operational_status_sanitizes_database_errors(monkeypatch):
+    def fail_connection():
+        raise RuntimeError("internal database error")
+
+    monkeypatch.setattr("operational.get_conn", fail_connection)
+
+    status = get_operational_status()
+
+    assert status["database"]["reachable"] is False
+    assert status["database"]["error"] == "Database unavailable"

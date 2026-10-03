@@ -531,8 +531,9 @@ def get_operational_status():
             for key, (schema_name, table_name) in tables.items():
                 table_counts[key] = _count(conn, schema_name, table_name)
             db_checks_complete = True
-    except Exception as exc:
-        db_error = str(exc)
+    except Exception:
+        db_error = "Database unavailable" if not db_reachable else "Database table checks failed"
+        db_checks_complete = False
 
     try:
         return build_operational_status(
