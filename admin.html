@@ -34,6 +34,15 @@
     .harvester-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
     .harvester-name{color:var(--text);font-weight:600}
     .harvester-meta{color:var(--muted);font-size:11px}
+    .evidence-panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:22px}
+    .evidence-panel h2{font-size:17px;margin:0 0 6px}
+    .evidence-note{color:var(--muted);font-size:12px;line-height:1.5;margin:0 0 12px}
+    .evidence-list{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .evidence-row{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:5px;font-size:12px}
+    .evidence-name{font-weight:700}
+    .evidence-detail{color:var(--muted)}
+    .evidence-state{font-weight:700}
+    @media(max-width:700px){.evidence-list{grid-template-columns:1fr}}
     .state-dot{display:inline-block;width:8px;height:8px;border-radius:999px;margin-right:6px;vertical-align:middle}
     .state-dot.running,.state-dot.idle{background:var(--ok)}
     .state-dot.error{background:var(--err)}
@@ -60,6 +69,12 @@
       <div class="status-card"><div class="status-value">--</div><div class="status-label">Readiness score</div></div>
     </div>
     <div class="status-note" id="opsRecommendation">Loading operational inventory...</div>
+
+    <section class="evidence-panel" aria-labelledby="moduleEvidenceHeading">
+      <h2 id="moduleEvidenceHeading">Module evidence</h2>
+      <p class="evidence-note">Structural checks of declared files and database tables only; these do not establish runtime behavior or canonical Brain completion.</p>
+      <div class="evidence-list" id="moduleEvidenceList" aria-live="polite"></div>
+    </section>
 
     <div class="grid">
       <div class="module">
@@ -193,6 +208,7 @@
   }
   var statusEl = document.getElementById('opsStatus');
   var recommendationEl = document.getElementById('opsRecommendation');
+  var moduleEvidenceListEl = document.getElementById('moduleEvidenceList');
   var headers = token ? {'Authorization': 'Bearer ' + token} : {};
   fetch('/api/v1/mission-control/status', {headers: headers})
     .then(function(res){
@@ -211,11 +227,41 @@
       Array.prototype.forEach.call(statusEl.querySelectorAll('.status-value'), function(el, idx){
         el.textContent = values[idx];
       });
+      moduleEvidenceListEl.textContent = '';
+      (data.mission_control_modules || []).forEach(function(module){
+        var evidence = module.completion_evidence || {};
+        var stateLabels = {
+          evidence_present: 'Declared evidence present',
+          incomplete: 'Declared evidence missing',
+          unknown: 'Database evidence unavailable'
+        };
+        var files = evidence.files || {};
+        var tables = evidence.tables || {};
+        var tableSummary = tables.required === 0
+          ? 'no declared tables'
+          : (tables.checked ? tables.present + '/' + tables.required + ' tables' : 'tables not checked');
+        var row = document.createElement('div');
+        row.className = 'evidence-row';
+        var name = document.createElement('span');
+        name.className = 'evidence-name';
+        name.textContent = module.name || module.key || 'Module';
+        var state = document.createElement('span');
+        state.className = 'evidence-state';
+        state.textContent = stateLabels[evidence.status] || 'Evidence unavailable';
+        var detail = document.createElement('span');
+        detail.className = 'evidence-detail';
+        detail.textContent = (files.present || 0) + '/' + (files.required || 0) + ' declared files • ' + tableSummary;
+        row.appendChild(name);
+        row.appendChild(state);
+        row.appendChild(detail);
+        moduleEvidenceListEl.appendChild(row);
+      });
       var next = (data.next_five_builds || [])[0] || 'No recommendation available from current repository evidence.';
       recommendationEl.textContent = 'Calyx operational recommendation: ' + next;
     })
     .catch(function(){
       recommendationEl.textContent = 'Operational inventory unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
+      moduleEvidenceListEl.textContent = 'Module evidence unavailable.';
     });
 
   var externalHealthDescEl = document.getElementById('externalHealthDesc');

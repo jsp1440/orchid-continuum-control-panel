@@ -396,12 +396,39 @@ SCHEDULE_RECOMMENDATIONS = [
 ]
 
 
-def annotate_module_tables(modules: list[dict[str, Any]], table_counts: dict[str, int | None]) -> list[dict[str, Any]]:
+def annotate_module_tables(
+    modules: list[dict[str, Any]],
+    table_counts: dict[str, int | None],
+    db_reachable: bool = False,
+    db_checks_complete: bool | None = None,
+) -> list[dict[str, Any]]:
+    if db_checks_complete is None:
+        db_checks_complete = db_reachable
     annotated = []
     for module in modules:
         item = dict(module)
-        item["files_present"] = [e for e in item["evidence"] if e.endswith((".py", ".html", ".md")) and _file_exists(e)]
+        required_files = [e for e in item["evidence"] if e.endswith((".py", ".html", ".md"))]
+        item["files_present"] = [path for path in required_files if _file_exists(path)]
         item["table_counts"] = {table: table_counts.get(table) for table in item.get("tables", [])}
+        required_tables = item.get("tables", [])
+        present_tables = [table for table in required_tables if table_counts.get(table) is not None]
+        if len(item["files_present"]) < len(required_files):
+            evidence_status = "incomplete"
+        elif required_tables and (not db_reachable or not db_checks_complete):
+            evidence_status = "unknown"
+        elif len(present_tables) < len(required_tables):
+            evidence_status = "incomplete"
+        else:
+            evidence_status = "evidence_present"
+        item["completion_evidence"] = {
+            "status": evidence_status,
+            "files": {"present": len(item["files_present"]), "required": len(required_files)},
+            "tables": {
+                "present": len(present_tables),
+                "required": len(required_tables),
+                "checked": db_reachable and db_checks_complete,
+            },
+        }
         annotated.append(item)
     return annotated
 
@@ -425,9 +452,16 @@ def readiness_score(modules: list[dict[str, Any]], pipelines: list[dict[str, Any
     }
 
 
-def build_operational_status(table_counts: dict[str, int | None] | None = None, db_reachable: bool = False, db_error: str | None = None) -> dict[str, Any]:
+def build_operational_status(
+    table_counts: dict[str, int | None] | None = None,
+    db_reachable: bool = False,
+    db_error: str | None = None,
+    db_checks_complete: bool | None = None,
+) -> dict[str, Any]:
+    if db_checks_complete is None:
+        db_checks_complete = db_reachable
     table_counts = table_counts or {}
-    modules = annotate_module_tables(MISSION_CONTROL_MODULES, table_counts)
+    modules = annotate_module_tables(MISSION_CONTROL_MODULES, table_counts, db_reachable, db_checks_complete)
     pipelines = [dict(pipeline) for pipeline in SCIENCE_PIPELINES]
     status_counts = {
         "mission_control": summarize_status(modules),
@@ -438,6 +472,7 @@ def build_operational_status(table_counts: dict[str, int | None] | None = None, 
         "database": {
             "reachable": db_reachable,
             "error": db_error,
+            "checks_complete": db_checks_complete,
             "table_counts": table_counts,
         },
         "mission_control_modules": modules,
@@ -445,6 +480,9 @@ def build_operational_status(table_counts: dict[str, int | None] | None = None, 
         "homepage_integration": HOMEPAGE_INTEGRATION,
         "schedule_recommendations": SCHEDULE_RECOMMENDATIONS,
         "status_counts": status_counts,
+        "completion_evidence_counts": summarize_status(
+            [{"status": module["completion_evidence"]["status"]} for module in modules]
+        ),
         "readiness": readiness_score(modules, pipelines),
         "deployment_required": {
             "frontend": False,
@@ -466,9 +504,15 @@ def build_operational_status(table_counts: dict[str, int | None] | None = None, 
 @router.get("/status")
 def get_operational_status():
     db_reachable = False
+    db_checks_complete = False
     db_error = None
     table_counts: dict[str, int | None] = {}
     tables = {
+        table: ("public", table)
+        for module in MISSION_CONTROL_MODULES
+        for table in module.get("tables", [])
+    }
+    tables.update({
         "oc_memory_decisions": ("public", "oc_memory_decisions"),
         "oc_memory_outbox": ("public", "oc_memory_outbox"),
         "oc_agent_registry": ("public", "oc_agent_registry"),
@@ -479,17 +523,23 @@ def get_operational_status():
         "images": ("public", "images"),
         "orchid_images": ("public", "orchid_images"),
         "orchid_occurrence": ("public", "orchid_occurrence"),
-    }
+    })
 
     try:
         with get_conn() as conn:
             db_reachable = True
             for key, (schema_name, table_name) in tables.items():
                 table_counts[key] = _count(conn, schema_name, table_name)
+            db_checks_complete = True
     except Exception as exc:
         db_error = str(exc)
 
     try:
-        return build_operational_status(table_counts=table_counts, db_reachable=db_reachable, db_error=db_error)
+        return build_operational_status(
+            table_counts=table_counts,
+            db_reachable=db_reachable,
+            db_error=db_error,
+            db_checks_complete=db_checks_complete,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Operational status failed: {exc}")
