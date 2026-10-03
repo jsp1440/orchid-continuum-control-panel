@@ -125,7 +125,8 @@ def _fetch_taxonomy_coverage(conn) -> Optional[dict[str, Any]]:
 
 def fetch_state(conn) -> dict[str, Any]:
     """Reads Engineering Memory (decisions + relationships), the Task
-    Queue, the Agent Registry, Engineering Findings, the Brain Outbox, and
+    Queue, the Agent Registry, Engineering Findings, implementation links,
+    the Brain Outbox, and
     (best-effort) taxonomy/image coverage. Returns raw rows only - no
     synthesis happens here, so this function is the only part of Calyx
     that touches the database. Tables that don't exist yet (e.g. a fresh
@@ -138,6 +139,7 @@ def fetch_state(conn) -> dict[str, Any]:
     tables = [
         ("oc_memory_decisions", "decisions", "updated_at"),
         ("oc_memory_decision_relationships", "relationships", "created_at"),
+        ("oc_memory_decision_links", "links", "created_at"),
         ("oc_agent_registry", "agents", "agent_key"),
         ("oc_agent_tasks", "tasks", "created_at"),
         ("oc_agent_findings", "findings", "created_at"),

@@ -45,6 +45,14 @@ COLLABORATION_NOT_MONITORED = [
     "inactive projects", "researchers working on similar problems",
     "conservation projects needing assistance", "collaboration opportunities",
 ]
+DELIVERY_NOT_MONITORED = [
+    "median time to validated integration",
+    "rework or abandonment rate",
+    "end-to-end user journey advancement",
+    "token and deployment cost per verified outcome",
+]
+
+IMPLEMENTATION_LINK_TYPES = {"commit", "pull_request", "release", "document", "task"}
 
 STALE_REVIEW_DAYS = 7
 
@@ -236,6 +244,69 @@ def evaluate_mission_progress(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def evaluate_delivery_governance(state: dict[str, Any]) -> dict[str, Any]:
+    """Measure delivery evidence without pretending that activity is outcome.
+
+    The repository does not yet ingest GitHub merge state, mounted journey
+    results, token spend, or deployment cost. The one defensible delivery
+    metric available here is therefore implementation-evidence yield: the
+    share of decisions marked implemented that also cite at least one
+    implementation artifact in Engineering Memory.
+
+    A link proves traceability, not that a PR merged or a user journey passed;
+    the response names that limitation and leaves unavailable metrics null.
+    """
+    decisions = state.get("decisions", [])
+    links = state.get("links", [])
+    implemented = [d for d in decisions if d.get("status") == "implemented"]
+    linked_decision_ids = {
+        link.get("decision_id")
+        for link in links
+        if link.get("link_type") in IMPLEMENTATION_LINK_TYPES
+    }
+    evidenced = [d for d in implemented if d.get("decision_id") in linked_decision_ids]
+    missing = [d for d in implemented if d.get("decision_id") not in linked_decision_ids]
+    yield_pct = round(100 * len(evidenced) / len(implemented)) if implemented else None
+
+    signals = [
+        {
+            "type": "delivery_evidence_gap",
+            "id": d["decision_id"],
+            "severity": "high",
+            "points": None,
+            "description": f"Implemented decision '{d['title']}' has no linked implementation artifact",
+            "agent_key": "engineering_auditor",
+            "evidence": {"type": "decision", "id": d["decision_id"]},
+        }
+        for d in missing
+    ]
+
+    return {
+        "domain": "delivery_governance",
+        "label": "Implementation Evidence Yield",
+        "score": yield_pct,
+        "score_direction": "higher_is_better",
+        "formula": (
+            "percentage of implemented Engineering Memory decisions with at least one linked "
+            "commit, pull request, release, document, or task; null if no implemented decisions exist."
+        ),
+        "counts": {
+            "implemented_decisions": len(implemented),
+            "with_implementation_evidence": len(evidenced),
+            "missing_implementation_evidence": len(missing),
+        },
+        "interpretation_limit": (
+            "A link establishes traceability only; it does not prove merge, deployment, mounted-journey "
+            "validation, scientific verification, or user-visible value."
+        ),
+        "signals": signals,
+        "data_coverage": {
+            "monitored": ["implemented decisions with linked implementation artifacts"],
+            "not_yet_monitored": DELIVERY_NOT_MONITORED,
+        },
+    }
+
+
 def evaluate_collaboration(_state: dict[str, Any]) -> dict[str, Any]:
     """Collaboration Opportunity Score: always null today. No researcher,
     project, or collaboration-tracking table exists anywhere in this
@@ -259,13 +330,20 @@ def evaluate_all(state: dict[str, Any]) -> list[dict[str, Any]]:
         evaluate_engineering(state),
         evaluate_scientific(state),
         evaluate_mission_progress(state),
+        evaluate_delivery_governance(state),
         evaluate_collaboration(state),
     ]
 
 
 # ---------- priority ranking ----------
 
-DOMAIN_WEIGHT = {"engineering": 3, "mission_progress": 2, "scientific": 1, "collaboration": 1}
+DOMAIN_WEIGHT = {
+    "engineering": 3,
+    "delivery_governance": 3,
+    "mission_progress": 2,
+    "scientific": 1,
+    "collaboration": 1,
+}
 SEVERITY_WEIGHT = {"critical": 100, "high": 80, "blocker": 70, "medium": 50, "opportunity": 20}
 
 
@@ -296,6 +374,8 @@ def _suggested_tool(domain: str, signal_type: str, severity: str) -> Optional[st
         return "Claude Code"
     if signal_type == "taxonomy_gap":
         return "Harvesters"
+    if signal_type == "delivery_evidence_gap":
+        return "Claude Code"
     return None
 
 
@@ -322,6 +402,8 @@ def _expected_impact(domain: str, severity: str) -> str:
         return "Unblocks a decision awaiting human review, which may itself be blocking dependent work."
     if domain == "scientific":
         return "Improves taxonomy/image documentation coverage, a foundational research asset."
+    if domain == "delivery_governance":
+        return "Restores traceability between an implemented decision and the artifact that delivered it."
     return "Addresses an open item of lower immediate severity."
 
 
