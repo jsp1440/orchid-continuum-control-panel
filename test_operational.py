@@ -1,9 +1,13 @@
+import pytest
+from fastapi import HTTPException
+
 from operational import (
     OPERATIONAL,
     PARTIAL,
     PIPELINE_NOT_IMPLEMENTED,
     annotate_module_tables,
     build_operational_status,
+    get_operational_status,
     summarize_status,
 )
 
@@ -99,3 +103,16 @@ def test_operational_status_summarizes_machine_derived_module_evidence():
 
     assert sum(status["completion_evidence_counts"].values()) == len(status["mission_control_modules"])
     assert all("completion_evidence" in module for module in status["mission_control_modules"])
+
+
+def test_operational_status_does_not_expose_internal_errors(monkeypatch):
+    def fail_status(**kwargs):
+        raise RuntimeError("sensitive internal error")
+
+    monkeypatch.setattr("operational.build_operational_status", fail_status)
+
+    with pytest.raises(HTTPException) as error:
+        get_operational_status()
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Operational status failed"

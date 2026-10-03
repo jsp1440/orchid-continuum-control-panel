@@ -541,5 +541,5 @@ def get_operational_status():
             db_error=db_error,
             db_checks_complete=db_checks_complete,
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Operational status failed: {exc}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Operational status failed")
