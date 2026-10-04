@@ -83,19 +83,68 @@ def test_module_evidence_keeps_table_state_unknown_when_database_unreachable(mon
     assert result["completion_evidence"]["tables"]["checked"] is False
 
 
-def test_module_evidence_keeps_table_state_unknown_when_database_check_fails(monkeypatch):
+def test_module_evidence_keeps_table_state_unknown_when_table_check_did_not_complete(monkeypatch):
     monkeypatch.setattr("operational._file_exists", lambda path: True)
     module = {"evidence": ["memory.py"], "tables": ["decisions"]}
 
-    result = annotate_module_tables(
-        [module],
-        {"decisions": None},
-        db_reachable=True,
-        db_checks_complete=False,
-    )[0]
+    result = annotate_module_tables([module], {}, db_reachable=True)[0]
 
     assert result["completion_evidence"]["status"] == "unknown"
     assert result["completion_evidence"]["tables"]["checked"] is False
+
+
+def test_partial_db_failure_preserves_already_validated_module_table_evidence(monkeypatch):
+    monkeypatch.setattr("operational._file_exists", lambda path: True)
+    checked = {"evidence": ["memory.py"], "tables": ["decisions"]}
+    unchecked = {"evidence": ["agents.py"], "tables": ["agent_tasks"]}
+
+    # "decisions" was validated before a later query failed, so "agent_tasks" has no result.
+    results = annotate_module_tables([checked, unchecked], {"decisions": 3}, db_reachable=True)
+
+    assert results[0]["completion_evidence"]["status"] == "evidence_present"
+    assert results[0]["completion_evidence"]["tables"] == {"present": 1, "required": 1, "checked": True}
+    assert results[1]["completion_evidence"]["status"] == "unknown"
+    assert results[1]["completion_evidence"]["tables"]["checked"] is False
+
+
+def test_module_with_zero_checkable_evidence_is_unknown_not_evidence_present(monkeypatch):
+    monkeypatch.setattr("operational._file_exists", lambda path: True)
+    module = {"evidence": ["admin.html disabled card", "GET /health"], "tables": []}
+
+    for reachable in (True, False):
+        result = annotate_module_tables([module], {}, db_reachable=reachable)[0]
+        assert result["completion_evidence"]["status"] == "unknown"
+        assert result["completion_evidence"]["files"] == {"present": 0, "required": 0}
+
+
+def test_operational_status_route_keeps_validated_tables_when_a_later_count_fails(monkeypatch):
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def rollback(self):
+            pass
+
+    def fake_count(conn, schema_name, table_name):
+        if table_name == "oc_agent_tasks":
+            raise RuntimeError("internal database error")
+        return 1
+
+    monkeypatch.setattr("operational.get_conn", lambda: FakeConn())
+    monkeypatch.setattr("operational._count", fake_count)
+
+    status = get_operational_status()
+
+    assert status["database"]["reachable"] is True
+    assert status["database"]["checks_complete"] is False
+    assert status["database"]["error"] == "Database table checks failed"
+    assert "internal database error" not in str(status)
+    assert "oc_agent_tasks" not in status["database"]["table_counts"]
+    memory = next(m for m in status["mission_control_modules"] if m["key"] == "engineering_memory")
+    assert memory["completion_evidence"]["status"] == "evidence_present"
 
 
 def test_operational_status_summarizes_machine_derived_module_evidence():
