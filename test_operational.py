@@ -6,7 +6,9 @@ from operational import (
     PARTIAL,
     PIPELINE_NOT_IMPLEMENTED,
     annotate_module_tables,
+    build_completion_graph,
     build_operational_status,
+    get_completion_graph,
     get_operational_status,
     summarize_status,
 )
@@ -49,6 +51,89 @@ def test_operational_status_includes_required_deployment_flags():
     assert flags["backend"] is True
     assert flags["database_migration"] is False
     assert flags["render_config"] is False
+
+
+def test_completion_graph_uses_canonical_mission_states_and_declared_dependency():
+    graph = build_completion_graph(
+        [
+            {"mission_key": "CP-001", "state": "completed"},
+            {"mission_key": "ATLAS-001", "state": "queued"},
+            {"mission_key": "LIT-001", "state": "running"},
+            {"mission_key": "CP-002", "state": "blocked"},
+        ]
+    )
+
+    states = {lane["mission_key"]: lane["queue_state"] for lane in graph["lanes"]}
+    assert states == {
+        "CP-001": "completed",
+        "ATLAS-001": "queued",
+        "LIT-001": "running",
+        "CP-002": "blocked",
+    }
+    assert graph["dependencies"] == [
+        {
+            "dependent": "CP-002",
+            "prerequisite": "CP-001",
+            "source": "CP-002 mission specification",
+        }
+    ]
+
+
+def test_completion_graph_marks_missing_or_unrecognized_states_unknown():
+    graph = build_completion_graph(
+        [
+            {"mission_key": "CP-001", "state": "fabricated"},
+            {"mission_key": "ATLAS-001", "state": None},
+        ]
+    )
+
+    assert all(lane["queue_state"] == "unknown" for lane in graph["lanes"])
+
+
+def test_completion_graph_reports_missing_backend_credential_without_network(monkeypatch):
+    monkeypatch.delenv("CALYX_BACKEND_API_KEY", raising=False)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("network must not be touched without a credential")
+
+    monkeypatch.setattr("operational.urllib.request.urlopen", fail_if_called)
+
+    graph = get_completion_graph()
+
+    assert graph["available"] is False
+    assert graph["reason"] == "CALYX_BACKEND_API_KEY not configured"
+    assert all(lane["queue_state"] == "unknown" for lane in graph["lanes"])
+
+
+def test_completion_graph_fetches_canonical_queue_with_backend_credential(monkeypatch):
+    monkeypatch.setenv("CALYX_BACKEND_API_KEY", "configured-test-key")
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"items":[{"mission_key":"CP-001","state":"queued"}]}'
+
+    def fake_urlopen(request, timeout):
+        seen["method"] = request.get_method()
+        seen["path"] = request.full_url
+        seen["key"] = request.get_header("X-api-key")
+        return Response()
+
+    monkeypatch.setattr("operational.urllib.request.urlopen", fake_urlopen)
+
+    graph = get_completion_graph()
+
+    assert seen["method"] == "GET"
+    assert seen["path"].endswith("/api/missions")
+    assert seen["key"] == "configured-test-key"
+    assert graph["available"] is True
+    assert graph["lanes"][0]["queue_state"] == "queued"
 
 
 def test_module_evidence_counts_zero_row_table_as_present(monkeypatch):
