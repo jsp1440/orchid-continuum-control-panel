@@ -76,6 +76,13 @@
       <div class="evidence-list" id="moduleEvidenceList" aria-live="polite"></div>
     </section>
 
+    <section class="evidence-panel" aria-labelledby="completionGraphHeading">
+      <h2 id="completionGraphHeading">Engineering completion graph</h2>
+      <p class="evidence-note">Read-only queue states from the Calyx Backend mission ledger. Missing or unreachable queue data is shown as unknown.</p>
+      <div class="evidence-list" id="completionGraphLanes" aria-live="polite"></div>
+      <p class="evidence-note" id="completionGraphDependencies"></p>
+    </section>
+
     <div class="grid">
       <div class="module">
         <div class="module-title">Engineering Memory</div>
@@ -209,6 +216,8 @@
   var statusEl = document.getElementById('opsStatus');
   var recommendationEl = document.getElementById('opsRecommendation');
   var moduleEvidenceListEl = document.getElementById('moduleEvidenceList');
+  var completionGraphLanesEl = document.getElementById('completionGraphLanes');
+  var completionGraphDependenciesEl = document.getElementById('completionGraphDependencies');
   var headers = token ? {'Authorization': 'Bearer ' + token} : {};
   fetch('/api/v1/mission-control/status', {headers: headers})
     .then(function(res){
@@ -262,6 +271,41 @@
     .catch(function(){
       recommendationEl.textContent = 'Operational inventory unavailable. Check ADMIN_PANEL_TOKEN and backend status.';
       moduleEvidenceListEl.textContent = 'Module evidence unavailable.';
+    });
+
+  fetch('/api/v1/mission-control/completion-graph', {headers: headers})
+    .then(function(res){
+      if (!res.ok) throw new Error('status ' + res.status);
+      return res.json();
+    })
+    .then(function(data){
+      completionGraphLanesEl.textContent = '';
+      (data.lanes || []).forEach(function(lane){
+        var row = document.createElement('div');
+        row.className = 'evidence-row';
+        var name = document.createElement('span');
+        name.className = 'evidence-name';
+        name.textContent = lane.name || lane.key || 'Mission lane';
+        var state = document.createElement('span');
+        state.className = 'evidence-state';
+        state.textContent = (lane.queue_state || 'unknown') + ' · ' + (lane.mission_key || 'no mission key');
+        row.appendChild(name);
+        row.appendChild(state);
+        completionGraphLanesEl.appendChild(row);
+      });
+      var dependencies = (data.dependencies || []).map(function(edge){
+        return edge.dependent + ' depends on ' + edge.prerequisite + ' (' + (edge.source || 'mission specification') + ')';
+      });
+      completionGraphDependenciesEl.textContent = dependencies.length
+        ? 'Declared dependency: ' + dependencies.join('; ')
+        : 'No dependency edges are available.';
+      if (!data.available) {
+        completionGraphDependenciesEl.textContent += ' Queue unavailable: ' + (data.reason || 'unknown reason') + '.';
+      }
+    })
+    .catch(function(){
+      completionGraphLanesEl.textContent = 'Mission Control request failed; queue states are unknown.';
+      completionGraphDependenciesEl.textContent = 'Declared dependency: CP-002 depends on CP-001 (CP-002 mission specification).';
     });
 
   var externalHealthDescEl = document.getElementById('externalHealthDesc');

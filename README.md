@@ -494,15 +494,14 @@ Control, independent of the backend credential below.
 
 | Env var | Required | Purpose |
 |---|---|---|
-| `CALYX_BACKEND_API_KEY` | No | Forwarded as `X-API-Key` to `orchid-calyx-backend`'s `/brain/journalism/*` routes, which require it (or an owner session this service does not have). If unset or blank, every route above **fails closed** with `503 {"available": false, "reason": "CALYX_BACKEND_API_KEY not configured"}` instead of attempting an unauthenticated call or fabricating a report. |
+| `CALYX_BACKEND_API_KEY` | No | Forwarded as `X-API-Key` to `orchid-calyx-backend`'s `/brain/journalism/*` routes and read-only `/api/missions` queue. If unset or blank, journalism routes fail closed with `503`; the completion graph reports the queue unavailable and each lane as `unknown` without attempting an unauthenticated call. |
 | `CALYX_BACKEND_JOURNALISM_TIMEOUT_SECONDS` | No | Outbound request timeout in seconds (default `20`). Generation can take longer than a plain health check. |
 
-**As of this feature's addition, `CALYX_BACKEND_API_KEY` is not
-configured in any deployed environment, so this feature is presently a
-no-op in production** - `/status` reports `available: false` and every
-other route returns `503` - until an owner explicitly supplies that
-credential. No credential value is created, guessed, or hard-coded
-anywhere in this repository.
+When `CALYX_BACKEND_API_KEY` is unset, `/status` reports
+`available: false`, journalism routes return `503`, and the completion graph
+stays `unknown`. An owner must explicitly configure the credential before
+the protected backend integrations can return live data. No credential value
+is created, guessed, or hard-coded anywhere in this repository.
 
 `GET /generate` (`POST` in the real contract) passes through the
 backend's `insufficient_evidence` and `unavailable_dependencies` fields

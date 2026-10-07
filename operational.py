@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.rows import dict_row
 
 from admin import require_admin_token
+from external_health import CALYX_BACKEND_BASE_URL
 
 router = APIRouter(
     prefix="/api/v1/mission-control",
@@ -33,6 +37,42 @@ PLACEHOLDER = "placeholder"
 DISCONNECTED = "disconnected"
 MISSING_DEPENDENCY = "missing_dependency"
 PIPELINE_NOT_IMPLEMENTED = "pipeline_not_yet_implemented"
+
+COMPLETION_GRAPH_LANES = [
+    {"key": "control_panel", "name": "Control Panel", "mission_key": "CP-001"},
+    {"key": "atlas", "name": "Atlas", "mission_key": "ATLAS-001"},
+    {
+        "key": "literature_lexicon",
+        "name": "Literature Lexicon",
+        "mission_key": "LIT-001",
+    },
+    {
+        "key": "control_panel_completion_graph",
+        "name": "Control Panel / Completion Graph",
+        "mission_key": "CP-002",
+    },
+]
+COMPLETION_GRAPH_DEPENDENCIES = [
+    {
+        "dependent": "CP-002",
+        "prerequisite": "CP-001",
+        "source": "CP-002 mission specification",
+    },
+]
+MISSION_STATES = {
+    "draft",
+    "awaiting_approval",
+    "approved",
+    "queued",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "cancelled",
+    "expired",
+    "superseded",
+    "blocked",
+}
 
 
 def get_conn():
@@ -69,6 +109,93 @@ def _file_exists(path: str) -> bool:
 
 def _route(path: str, method: str = "GET") -> str:
     return f"{method} {path}"
+
+
+def build_completion_graph(missions: list[dict[str, Any]]) -> dict[str, Any]:
+    by_key = {
+        mission["mission_key"].strip().casefold(): mission
+        for mission in missions
+        if isinstance(mission, dict)
+        and isinstance(mission.get("mission_key"), str)
+        and mission["mission_key"].strip()
+    }
+    lanes = []
+    for lane in COMPLETION_GRAPH_LANES:
+        mission = by_key.get(lane["mission_key"].casefold())
+        state = mission.get("state") if mission else None
+        state = state.casefold() if isinstance(state, str) else "unknown"
+        lanes.append(
+            {
+                **lane,
+                "queue_state": state if state in MISSION_STATES else "unknown",
+            }
+        )
+    return {
+        "lanes": lanes,
+        "dependencies": [dict(edge) for edge in COMPLETION_GRAPH_DEPENDENCIES],
+    }
+
+
+def _fetch_calyx_missions() -> dict[str, Any]:
+    api_key = (os.getenv("CALYX_BACKEND_API_KEY") or "").strip()
+    if not api_key:
+        return {
+            "available": False,
+            "reason": "CALYX_BACKEND_API_KEY not configured",
+            "items": [],
+        }
+
+    request = urllib.request.Request(
+        CALYX_BACKEND_BASE_URL + "/api/missions",
+        headers={
+            "User-Agent": "orchid-continuum-mission-control-completion-graph/1.0",
+            "X-API-Key": api_key,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return {
+            "available": False,
+            "reason": f"Calyx Backend returned HTTP {exc.code}",
+            "items": [],
+        }
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return {
+            "available": False,
+            "reason": "Calyx Backend mission queue unreachable",
+            "items": [],
+        }
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {
+            "available": False,
+            "reason": "Calyx Backend mission queue returned invalid JSON",
+            "items": [],
+        }
+
+    items = body.get("items") if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        return {
+            "available": False,
+            "reason": "Calyx Backend mission queue response is invalid",
+            "items": [],
+        }
+    return {"available": True, "reason": None, "items": items}
+
+
+@router.get("/completion-graph")
+def get_completion_graph():
+    queue = _fetch_calyx_missions()
+    graph = build_completion_graph(queue["items"])
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "Calyx Backend GET /api/missions",
+        "available": queue["available"],
+        "reason": queue["reason"],
+        **graph,
+    }
 
 
 MISSION_CONTROL_MODULES: list[dict[str, Any]] = [
