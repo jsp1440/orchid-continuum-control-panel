@@ -400,10 +400,7 @@ def annotate_module_tables(
     modules: list[dict[str, Any]],
     table_counts: dict[str, int | None],
     db_reachable: bool = False,
-    db_checks_complete: bool | None = None,
 ) -> list[dict[str, Any]]:
-    if db_checks_complete is None:
-        db_checks_complete = db_reachable
     annotated = []
     for module in modules:
         item = dict(module)
@@ -412,9 +409,12 @@ def annotate_module_tables(
         item["table_counts"] = {table: table_counts.get(table) for table in item.get("tables", [])}
         required_tables = item.get("tables", [])
         present_tables = [table for table in required_tables if table_counts.get(table) is not None]
+        tables_checked = db_reachable and all(table in table_counts for table in required_tables)
         if len(item["files_present"]) < len(required_files):
             evidence_status = "incomplete"
-        elif required_tables and (not db_reachable or not db_checks_complete):
+        elif not required_files and not required_tables:
+            evidence_status = "unknown"
+        elif required_tables and not tables_checked:
             evidence_status = "unknown"
         elif len(present_tables) < len(required_tables):
             evidence_status = "incomplete"
@@ -426,7 +426,7 @@ def annotate_module_tables(
             "tables": {
                 "present": len(present_tables),
                 "required": len(required_tables),
-                "checked": db_reachable and db_checks_complete,
+                "checked": tables_checked,
             },
         }
         annotated.append(item)
@@ -461,7 +461,7 @@ def build_operational_status(
     if db_checks_complete is None:
         db_checks_complete = db_reachable
     table_counts = table_counts or {}
-    modules = annotate_module_tables(MISSION_CONTROL_MODULES, table_counts, db_reachable, db_checks_complete)
+    modules = annotate_module_tables(MISSION_CONTROL_MODULES, table_counts, db_reachable)
     pipelines = [dict(pipeline) for pipeline in SCIENCE_PIPELINES]
     status_counts = {
         "mission_control": summarize_status(modules),
