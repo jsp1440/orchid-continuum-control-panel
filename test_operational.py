@@ -83,19 +83,50 @@ def test_module_evidence_keeps_table_state_unknown_when_database_unreachable(mon
     assert result["completion_evidence"]["tables"]["checked"] is False
 
 
-def test_module_evidence_keeps_table_state_unknown_when_database_check_fails(monkeypatch):
+def test_module_evidence_keeps_table_state_unknown_when_table_check_did_not_complete(monkeypatch):
     monkeypatch.setattr("operational._file_exists", lambda path: True)
     module = {"evidence": ["memory.py"], "tables": ["decisions"]}
 
-    result = annotate_module_tables(
-        [module],
-        {"decisions": None},
-        db_reachable=True,
-        db_checks_complete=False,
-    )[0]
+    result = annotate_module_tables([module], {}, db_reachable=True)[0]
 
     assert result["completion_evidence"]["status"] == "unknown"
     assert result["completion_evidence"]["tables"]["checked"] is False
+
+
+def test_operational_status_preserves_checked_tables_when_a_later_check_fails(monkeypatch):
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_count(conn, schema_name, table_name):
+        if table_name == "oc_agent_tasks":
+            raise RuntimeError("internal database error")
+        return 1
+
+    monkeypatch.setattr("operational.get_conn", lambda: FakeConn())
+    monkeypatch.setattr("operational._count", fake_count)
+
+    status = get_operational_status()
+    memory = next(module for module in status["mission_control_modules"] if module["key"] == "engineering_memory")
+
+    assert status["database"]["checks_complete"] is False
+    assert status["database"]["error"] == "Database table checks failed"
+    assert "internal database error" not in str(status)
+    assert memory["completion_evidence"]["status"] == "evidence_present"
+    assert memory["completion_evidence"]["tables"]["checked"] is True
+
+
+def test_module_with_zero_checkable_declarations_is_unknown(monkeypatch):
+    monkeypatch.setattr("operational._file_exists", lambda path: True)
+    module = {"evidence": ["admin.html disabled card", "GET /health"], "tables": []}
+
+    for db_reachable in (True, False):
+        result = annotate_module_tables([module], {}, db_reachable=db_reachable)[0]
+        assert result["completion_evidence"]["status"] == "unknown"
+        assert result["completion_evidence"]["files"] == {"present": 0, "required": 0}
 
 
 def test_operational_status_summarizes_machine_derived_module_evidence():
